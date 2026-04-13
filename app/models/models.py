@@ -6,6 +6,7 @@ from datetime import datetime
 
 Base = declarative_base()
 
+
 class Cliente(Base):
     __tablename__ = "clientes"
 

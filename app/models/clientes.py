@@ -3,7 +3,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime
-from models._init_ import Base
+from app.models._init_ import Base
 
 class Cliente(Base):
     __tablename__ = "clientes"

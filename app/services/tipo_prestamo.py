@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
-from models.models import TipoPrestamo
-from schemas.tipo_prestamo import TipoPrestamoCreate, TipoPrestamoUpdate
+from app.models.models import TipoPrestamo
+from app.schemas.tipo_prestamo import TipoPrestamoCreate, TipoPrestamoUpdate
 
 def get_tipo_prestamo(db: Session, skip: int = 0, limit: int = 10):
     return db.query(TipoPrestamo).offset(skip).limit(limit).all()

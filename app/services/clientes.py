@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
-from models.models import Cliente
-from schemas.clientes import ClienteCreate, ClienteUpdate
+from app.models.models import Cliente
+from app.schemas.clientes import ClienteCreate, ClienteUpdate
 
 def get_clientes(db: Session, skip: int = 0, limit: int = 10):
     return db.query(Cliente).offset(skip).limit(limit).all()

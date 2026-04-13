@@ -1,8 +1,9 @@
 from fastapi import FastAPI
-from routers import clientes, tipo_prestamo
-
+from app.routes import clientes, tipo_prestamo
+from app.db.database import init_db
 
 app = FastAPI()
+init_db()
 
 @app.get("/")
 def read_root():
@@ -10,5 +11,6 @@ def read_root():
 
 app.include_router(clientes.router)
 app.include_router(tipo_prestamo.router)
+
 
 

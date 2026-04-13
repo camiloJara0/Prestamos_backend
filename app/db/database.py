@@ -1,11 +1,11 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from models.models import Base
+from app.models.models import Base
+from app.models import models
 
+DATABASE_URL = "sqlite:///./test.db"
 
-DATABASE_URL = "mysql+pymysql://root:@localhost/prestamos"
-
-engine = create_engine(DATABASE_URL, echo=True)
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db():
