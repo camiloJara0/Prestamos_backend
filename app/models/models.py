@@ -1,10 +1,9 @@
 from sqlalchemy import (
     Column, Integer, String, Float, Date, DateTime, ForeignKey, Enum, Text
 )
-from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy.orm import relationship
 from datetime import datetime
-
-Base = declarative_base()
+from app.models.base import Base
 
 
 class Cliente(Base):

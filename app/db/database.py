@@ -1,7 +1,7 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from app.models.models import Base
-from app.models import models
+from app.models.base import Base
+import app.models 
 
 # Base de datos SQLite para desarrollo y pruebas. En produccion se cambiara
 DATABASE_URL = "sqlite:///./test.db"

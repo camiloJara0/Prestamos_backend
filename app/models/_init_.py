@@ -1,6 +1,8 @@
+from .base import Base
 from .clientes import Cliente
-from .prestamos import Prestamo
-from .pagos import Pago
+from .prestamo import Prestamo
+from .pago import Pago
+from .models import Usuario
 
 # Exporta Base para que database.py pueda usarlo
 from sqlalchemy.orm import declarative_base
