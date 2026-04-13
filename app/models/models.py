@@ -161,3 +161,17 @@ class PrestamoPerdido(Base):
     valor_perdido = Column(Float)
     motivo = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+# Modelo de Usuario : Es la tabla en la base de datos que guarda los usuarios del sistema. 
+# Tiene email, contraseña (guardada como hash), rol (admin/usuario) y estado. 
+
+class Usuario(Base):
+    __tablename__ = "usuarios"
+
+    id = Column(Integer, primary_key=True, index=True)
+    nombre = Column(String(100), nullable=False)
+    email = Column(String(100), unique=True, nullable=False)
+    hashed_password = Column(String(255), nullable=False)
+    rol = Column(Enum("admin", "usuario", name="rol_usuario"), default="usuario")
+    estado = Column(Enum("activo", "inactivo", name="estado_usuario"), default="activo")
+    created_at = Column(DateTime, default=datetime.utcnow)
