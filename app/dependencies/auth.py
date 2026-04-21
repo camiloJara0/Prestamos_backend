@@ -17,3 +17,15 @@ def get_current_user(credentials : HTTPAuthorizationCredentials = Depends(bearer
             status_code = status.HTTP_401_UNAUTHORIZED,
             detail="token invalido o vencido",
         )
+    
+# requerimiento de rol superior, sirve en caso de querer restringir el acceso a ciertos endpoints a usuarios con roles específicos
+
+def require_rol(rol_requerido: str):
+    def verificar_rol(current_user: dict = Depends(get_current_user)):
+        if current_user.get("rol") != rol_requerido:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail= "Acceso denegado : no tienes permiso para realizar esta accion"
+            )
+        return current_user
+    return verificar_rol
