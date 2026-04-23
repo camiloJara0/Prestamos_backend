@@ -16,6 +16,7 @@ jwcrypto
 passlib[bcrypt]
 pydantic==2.12.5
 pydantic_core==2.41.5
+python-dateutil
 PyMySQL==1.1.2
 python-jose[cryptography]
 SQLAlchemy==2.0.48
