@@ -192,3 +192,11 @@ class Token (Base):
     expires_at = Column(DateTime, nullable=False)
 
     usuario = relationship("Usuario", back_populates="tokens")
+
+# Guarda el total de capital disponible en el negocio
+class Capital(Base):
+    __tablename__ = "capital"
+
+    id = Column(Integer, primary_key=True, index=True)
+    monto_total = Column(Float, default=0.0)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
