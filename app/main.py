@@ -2,6 +2,8 @@ from fastapi import FastAPI
 from app.routes import clientes, tipo_prestamo
 from app.db.database import init_db
 from app.routes.auth import router as auth_router
+from app.routes.capital import router as capital_router
+from app.routes.prestamo import router as prestamo_router
 
 app = FastAPI()
 init_db()
@@ -13,5 +15,7 @@ def read_root():
 app.include_router(clientes.router)
 app.include_router(tipo_prestamo.router)
 app.include_router(auth_router, prefix = "/auth", tags = ["Authentication"])
+app.include_router(capital_router)
+app.include_router(prestamo_router)
 
 

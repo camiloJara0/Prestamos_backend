@@ -174,3 +174,29 @@ class Usuario(Base):
     rol = Column(Enum("admin", "usuario", name="rol_usuario"), default="usuario")
     estado = Column(Enum("activo", "inactivo", name="estado_usuario"), default="activo")
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    tokens = relationship("Token", back_populates="usuario")
+
+# cuando el usuario haga login guardamos el token en la DB, y cuando haga logout lo marcamos como inválido. 
+# Así aunque el token no haya expirado, si está en la tabla como inválido el servidor lo rechaza.
+
+class Token (Base):
+    __tablename__ = "tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"))
+    access_token = Column(String(500), nullable=False)
+    refresh_token = Column(String(500), nullable=False)
+    activo = Column(Integer, default=1) # 1 = activo - 0 = inactivo
+    created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+
+    usuario = relationship("Usuario", back_populates="tokens")
+
+# Guarda el total de capital disponible en el negocio
+class Capital(Base):
+    __tablename__ = "capital"
+
+    id = Column(Integer, primary_key=True, index=True)
+    monto_total = Column(Float, default=0.0)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
