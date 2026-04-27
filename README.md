@@ -51,37 +51,27 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
-4. Abre la documentación interactiva:
+4. Poblar la base de datos con datos de prueba:
+```bash
+python -m app.db.seed
+```
+
+5. Abre la documentación interactiva:
 ```
 http://127.0.0.1:8000/docs
 ```
 
 ---
 
-## Crear usuario administrador
+## Datos de prueba (seed)
 
-Ejecuta este comando una vez para crear el usuario inicial:
+El seed crea automáticamente:
+- **Usuario admin** — email: `admin@test.com` / password: `123456`
+- **3 tipos de préstamo** — Personal, Empresarial y Emergencia
+- **1 cliente de prueba** — Carlos Rodríguez
+- **Capital inicial** — 10,000,000
 
-```bash
-python -c "
-from app.db.database import SessionLocal
-from app.models.models import Usuario
-from app.core.security import hash_password
-
-db = SessionLocal()
-usuario = Usuario(
-    nombre='Admin',
-    email='admin@test.com',
-    hashed_password=hash_password('123456'),
-    rol='admin',
-    estado='activo'
-)
-db.add(usuario)
-db.commit()
-print('Usuario creado')
-db.close()
-"
-```
+El seed es seguro de ejecutar varias veces — no duplica datos existentes.
 
 ---
 
@@ -124,6 +114,7 @@ db.close()
 |--------|----------|-------------|
 | POST | `/prestamos` | Crear préstamo con cuotas automáticas |
 | GET | `/prestamos` | Listar préstamos activos |
+| POST | `/prestamos/{id}/renovar` | Renovar préstamo existente |
 
 ---
 
@@ -152,6 +143,17 @@ Al crear un préstamo el sistema automáticamente:
 
 ---
 
+Al renovar un préstamo el sistema:
+1. Verifica que el préstamo esté activo
+2. Calcula el saldo pendiente
+3. Descuenta el abono si hay uno
+4. Crea un nuevo préstamo con el saldo restante
+5. Marca el préstamo original como renovado
+6. Registra la relación en la tabla de renovaciones
+7. Genera nuevas cuotas
+
+---
+
 ## Estado del proyecto
 
 ### Semana 1 y 2 — Backend
@@ -165,7 +167,7 @@ Al crear un préstamo el sistema automáticamente:
 | Registro de movimientos de capital | ✅ Completado |
 | Creación de préstamo con lógica financiera | ✅ Completado |
 | Generación de cuotas | ✅ Completado |
-| Renovación de préstamo | ⏳ Pendiente |
+| Renovación de préstamo | ✅ Completado |
 | Préstamo Perdido | ⏳ Pendiente |
 | Registro de pagos | ⏳ Pendiente |
 | Cálculo automático de mora | ⏳ Pendiente |
