@@ -28,3 +28,10 @@ class PrestamoOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+class RenovacionCreate(BaseModel):
+    porcentaje_interes: float
+    numero_cuotas: int
+    abono: Optional[float] = 0.0
+    fecha_renovacion: date
+    observaciones: Optional[str] = None
