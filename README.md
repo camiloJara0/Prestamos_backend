@@ -15,6 +15,7 @@ Backend para sistema de gestión de préstamos personales desarrollado con **Fas
 - Pydantic para validación de datos
 - openpyxl para exportación Excel
 - reportlab para exportación PDF
+- python-dotenv para variables de entorno
 
 ---
 
@@ -48,20 +49,46 @@ cd Prestamos_backend
 pip install -r requirements.txt
 ```
 
-3. Inicia el servidor:
+3. Crea el archivo `.env` en la raíz del proyecto (ver sección Variables de entorno)
+
+4. Inicia el servidor:
 ```bash
 uvicorn app.main:app --reload
 ```
 
-4. Poblar la base de datos con datos de prueba:
+5. Poblar la base de datos con datos de prueba:
 ```bash
 python -m app.db.seed
 ```
 
-5. Abre la documentación interactiva:
+6. Abre la documentación interactiva:
 ```
 http://127.0.0.1:8000/docs
 ```
+
+---
+
+## Variables de entorno
+
+Crea un archivo `.env` en la raíz del proyecto con estas variables:
+
+```env
+SECRET_KEY=tu_clave_secreta_larga_y_aleatoria
+DATABASE_URL=sqlite:///./test.db
+ENCRYPTION_KEY=tu_clave_de_encriptacion
+FRONTEND_URL=http://localhost:3000
+```
+
+Para producción cambia `DATABASE_URL` por MySQL y `FRONTEND_URL` por la URL real del frontend:
+
+```env
+SECRET_KEY=tu_clave_secreta_larga_y_aleatoria
+DATABASE_URL=mysql+pymysql://usuario:password@host/prestamos
+ENCRYPTION_KEY=tu_clave_de_encriptacion
+FRONTEND_URL=https://tupagina.com
+```
+
+> **Importante:** El archivo `.env` nunca debe subirse al repositorio. Ya está incluido en `.gitignore`.
 
 ---
 
@@ -134,6 +161,9 @@ El seed es seguro de ejecutar varias veces — no duplica datos existentes.
 | GET | `/pagos` | Listar pagos |
 
 ### Reportes
+Los endpoints de reportes aceptan filtros opcionales: `mes` (1-12) y `anio` (ej: 2026).
+Si no se especifica ninguno devuelve todos los datos históricos.
+
 | Método | Endpoint | Descripción |
 |--------|----------|-------------|
 | GET | `/reportes/ganancias` | Reporte de ganancias en JSON |
@@ -142,6 +172,14 @@ El seed es seguro de ejecutar varias veces — no duplica datos existentes.
 | GET | `/reportes/ganancias/pdf` | Exportar ganancias en PDF |
 | GET | `/reportes/perdidas/excel` | Exportar pérdidas en Excel |
 | GET | `/reportes/perdidas/pdf` | Exportar pérdidas en PDF |
+
+Ejemplos de uso con filtros:
+```
+GET /reportes/ganancias?mes=4&anio=2026   → Abril 2026
+GET /reportes/ganancias?anio=2026         → Todo el año 2026
+GET /reportes/ganancias?mes=4             → Todos los abriles
+GET /reportes/ganancias                   → Todos los periodos
+```
 
 ---
 
@@ -154,6 +192,8 @@ El seed es seguro de ejecutar varias veces — no duplica datos existentes.
 - Tokens almacenados en base de datos para poder invalidarlos en logout
 - Todos los endpoints protegidos requieren token válido en el header
 - Control de roles (admin/usuario) con respuesta 403 para accesos no autorizados
+- Claves secretas gestionadas mediante variables de entorno — nunca hardcodeadas en el código
+- CORS configurado para permitir solo el origen del frontend
 
 ---
 
@@ -212,17 +252,10 @@ Al marcar un préstamo como perdido el sistema:
 
 ---
 
-## Variables de entorno recomendadas para producción
-
-```env
-SECRET_KEY=tu_clave_secreta_larga
-DATABASE_URL=mysql+pymysql://usuario:password@host/db
-```
-
----
-
 ## Notas de desarrollo
 
 - La base de datos SQLite se genera automáticamente al iniciar el servidor
 - El archivo `test.db` está excluido del repositorio vía `.gitignore`
+- El archivo `.env` está excluido del repositorio vía `.gitignore`
 - Para producción se recomienda migrar a MySQL o PostgreSQL
+- El CORS está configurado con `FRONTEND_URL` del `.env` — en desarrollo usa `http://localhost:3000`
