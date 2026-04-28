@@ -5,10 +5,13 @@
 # GET /reportes/ganancias/pdf : exportar ganancias en PDF
 # GET /reportes/perdidas/excel : exportar perdidas en Excel
 # GET /reportes/perdidas/pdf : exportar perdidas en PDF
+# Todos los endpoints aceptan filtros opcionales: mes, anio
+# Si no se especifica ninguno devuelve todos los datos
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from typing import Optional
 from app.db.database import SessionLocal
 from app.services.reporte import get_reporte_ganancias, get_reporte_perdidas, exportar_excel, exportar_pdf
 from app.dependencies.auth import get_current_user
@@ -23,16 +26,31 @@ def get_db():
         db.close()
 
 @router.get("/ganancias")
-def reporte_ganancias(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    return get_reporte_ganancias(db)
+def reporte_ganancias(
+    mes: Optional[int] = Query(None, description="Mes (1-12)"),
+    anio: Optional[int] = Query(None, description="Año (ej: 2026)"),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    return get_reporte_ganancias(db, mes=mes, anio=anio)
 
 @router.get("/perdidas")
-def reporte_perdidas(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    return get_reporte_perdidas(db)
+def reporte_perdidas(
+    mes: Optional[int] = Query(None, description="Mes (1-12)"),
+    anio: Optional[int] = Query(None, description="Año (ej: 2026)"),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    return get_reporte_perdidas(db, mes=mes, anio=anio)
 
 @router.get("/ganancias/excel")
-def ganancias_excel(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    buffer = exportar_excel(db, "ganancias")
+def ganancias_excel(
+    mes: Optional[int] = Query(None, description="Mes (1-12)"),
+    anio: Optional[int] = Query(None, description="Año (ej: 2026)"),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    buffer = exportar_excel(db, "ganancias", mes=mes, anio=anio)
     return StreamingResponse(
         buffer,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -40,8 +58,13 @@ def ganancias_excel(db: Session = Depends(get_db), current_user: dict = Depends(
     )
 
 @router.get("/ganancias/pdf")
-def ganancias_pdf(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    buffer = exportar_pdf(db, "ganancias")
+def ganancias_pdf(
+    mes: Optional[int] = Query(None, description="Mes (1-12)"),
+    anio: Optional[int] = Query(None, description="Año (ej: 2026)"),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    buffer = exportar_pdf(db, "ganancias", mes=mes, anio=anio)
     return StreamingResponse(
         buffer,
         media_type="application/pdf",
@@ -49,8 +72,13 @@ def ganancias_pdf(db: Session = Depends(get_db), current_user: dict = Depends(ge
     )
 
 @router.get("/perdidas/excel")
-def perdidas_excel(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    buffer = exportar_excel(db, "perdidas")
+def perdidas_excel(
+    mes: Optional[int] = Query(None, description="Mes (1-12)"),
+    anio: Optional[int] = Query(None, description="Año (ej: 2026)"),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    buffer = exportar_excel(db, "perdidas", mes=mes, anio=anio)
     return StreamingResponse(
         buffer,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -58,8 +86,13 @@ def perdidas_excel(db: Session = Depends(get_db), current_user: dict = Depends(g
     )
 
 @router.get("/perdidas/pdf")
-def perdidas_pdf(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    buffer = exportar_pdf(db, "perdidas")
+def perdidas_pdf(
+    mes: Optional[int] = Query(None, description="Mes (1-12)"),
+    anio: Optional[int] = Query(None, description="Año (ej: 2026)"),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    buffer = exportar_pdf(db, "perdidas", mes=mes, anio=anio)
     return StreamingResponse(
         buffer,
         media_type="application/pdf",
