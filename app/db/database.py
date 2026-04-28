@@ -1,12 +1,12 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from app.models.base import Base
-import app.models 
+import app.models
 
-# Base de datos SQLite para desarrollo y pruebas. En produccion se cambiara
-DATABASE_URL = "mysql+pymysql://root:@localhost/prestamos"
+# Base de datos SQLite para desarrollo y pruebas. En produccion se cambiara a MySQL
+DATABASE_URL = "sqlite:///./test.db"
 
-engine = create_engine(DATABASE_URL, echo=True)
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db():

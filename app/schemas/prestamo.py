@@ -35,3 +35,17 @@ class RenovacionCreate(BaseModel):
     abono: Optional[float] = 0.0
     fecha_renovacion: date
     observaciones: Optional[str] = None
+
+class PrestamoPerdidoOut(BaseModel):
+    id: int
+    prestamo_id: int
+    fecha: date
+    valor_perdido: float
+    motivo: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+class MarcarPerdidoRequest(BaseModel):
+    motivo: Optional[str] = None
+    fecha: date

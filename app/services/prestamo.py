@@ -159,3 +159,52 @@ def renovar_prestamo(db: Session, prestamo_id: int, renovacion):
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error al renovar el prestamo: {str(e)}")
+    
+def marcar_prestamo_perdido(db: Session, prestamo_id: int, datos):
+    # Busca el prestamo y valida que exista y este activo
+    prestamo = db.query(Prestamo).filter(Prestamo.id == prestamo_id).first()
+    if not prestamo:
+        raise HTTPException(status_code=404, detail="Prestamo no encontrado")
+    if prestamo.estado in ["pagado", "perdido", "renovado"]:
+        raise HTTPException(status_code=400, detail=f"No se puede marcar como perdido un prestamo en estado {prestamo.estado}")
+
+    valor_perdido = prestamo.saldo_pendiente
+
+    try:
+        # Registra en prestamos_perdidos
+        from app.models.models import PrestamoPerdido
+        perdido = PrestamoPerdido(
+            prestamo_id=prestamo.id,
+            fecha=datos.fecha,
+            valor_perdido=valor_perdido,
+            motivo=datos.motivo
+        )
+        db.add(perdido)
+
+        # Actualiza estado del prestamo
+        prestamo.estado = "perdido"
+
+        # Registra impacto en movimientos de capital
+        movimiento = MovimientoCapital(
+            tipo_movimiento="perdida",
+            descripcion=f"Prestamo {prestamo.id} marcado como perdido",
+            valor=valor_perdido,
+            fecha=datos.fecha,
+            prestamo_id=prestamo.id
+        )
+        db.add(movimiento)
+
+        db.commit()
+        db.refresh(prestamo)
+        return  {
+            "prestamo": prestamo,
+            "valor_perdido": valor_perdido,
+            "motivo": datos.motivo,
+            "fecha": datos.fecha  
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al marcar prestamo como perdido: {str(e)}")
