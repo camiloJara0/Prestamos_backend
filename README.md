@@ -13,6 +13,9 @@ Backend para sistema de gestión de préstamos personales desarrollado con **Fas
 - JWT con encriptación JWE (python-jose + jwcrypto)
 - bcrypt para hash de contraseñas
 - Pydantic para validación de datos
+- openpyxl para exportación Excel
+- reportlab para exportación PDF
+- python-dotenv para variables de entorno
 
 ---
 
@@ -46,42 +49,58 @@ cd Prestamos_backend
 pip install -r requirements.txt
 ```
 
-3. Inicia el servidor:
+3. Crea el archivo `.env` en la raíz del proyecto (ver sección Variables de entorno)
+
+4. Inicia el servidor:
 ```bash
 uvicorn app.main:app --reload
 ```
 
-4. Abre la documentación interactiva:
+5. Poblar la base de datos con datos de prueba:
+```bash
+python -m app.db.seed
+```
+
+6. Abre la documentación interactiva:
 ```
 http://127.0.0.1:8000/docs
 ```
 
 ---
 
-## Crear usuario administrador
+## Variables de entorno
 
-Ejecuta este comando una vez para crear el usuario inicial:
+Crea un archivo `.env` en la raíz del proyecto con estas variables:
 
-```bash
-python -c "
-from app.db.database import SessionLocal
-from app.models.models import Usuario
-from app.core.security import hash_password
-
-db = SessionLocal()
-usuario = Usuario(
-    nombre='Admin',
-    email='admin@test.com',
-    hashed_password=hash_password('123456'),
-    rol='admin',
-    estado='activo'
-)
-db.add(usuario)
-db.commit()
-print('Usuario creado')
-db.close()
-"
+```env
+SECRET_KEY=tu_clave_secreta_larga_y_aleatoria
+DATABASE_URL=sqlite:///./test.db
+ENCRYPTION_KEY=tu_clave_de_encriptacion
+FRONTEND_URL=http://localhost:3000
 ```
+
+Para producción cambia `DATABASE_URL` por MySQL y `FRONTEND_URL` por la URL real del frontend:
+
+```env
+SECRET_KEY=tu_clave_secreta_larga_y_aleatoria
+DATABASE_URL=mysql+pymysql://usuario:password@host/prestamos
+ENCRYPTION_KEY=tu_clave_de_encriptacion
+FRONTEND_URL=https://tupagina.com
+```
+
+> **Importante:** El archivo `.env` nunca debe subirse al repositorio. Ya está incluido en `.gitignore`.
+
+---
+
+## Datos de prueba (seed)
+
+El seed crea automáticamente:
+- **Usuario admin** — email: `admin@test.com` / password: `123456`
+- **3 tipos de préstamo** — Personal, Empresarial y Emergencia
+- **1 cliente de prueba** — Carlos Rodríguez
+- **Capital inicial** — 10,000,000
+
+El seed es seguro de ejecutar varias veces — no duplica datos existentes.
 
 ---
 
@@ -113,6 +132,14 @@ db.close()
 | PUT | `/tipo_prestamo/{id}` | Actualizar tipo |
 | DELETE | `/tipo_prestamo/{id}` | Eliminar tipo |
 
+### Tipo de Pagos
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| POST | `/tipo_pagos` | Crear tipo de pago |
+| GET | `/tipo_pagos` | Listar tipos de pago activos |
+| PUT | `/tipo_pagos/{id}` | Actualizar tipo de pago |
+| DELETE | `/tipo_pagos/{id}` | Eliminar tipo de pago |
+
 ### Capital
 | Método | Endpoint | Descripción |
 |--------|----------|-------------|
@@ -124,6 +151,35 @@ db.close()
 |--------|----------|-------------|
 | POST | `/prestamos` | Crear préstamo con cuotas automáticas |
 | GET | `/prestamos` | Listar préstamos activos |
+| POST | `/prestamos/{id}/renovar` | Renovar préstamo existente |
+| POST | `/prestamos/{id}/marcar_perdido` | Marcar préstamo como perdido |
+
+### Pagos
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| POST | `/pagos` | Registrar pago de cuota |
+| GET | `/pagos` | Listar pagos |
+
+### Reportes
+Los endpoints de reportes aceptan filtros opcionales: `mes` (1-12) y `anio` (ej: 2026).
+Si no se especifica ninguno devuelve todos los datos históricos.
+
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| GET | `/reportes/ganancias` | Reporte de ganancias en JSON |
+| GET | `/reportes/perdidas` | Reporte de pérdidas en JSON |
+| GET | `/reportes/ganancias/excel` | Exportar ganancias en Excel |
+| GET | `/reportes/ganancias/pdf` | Exportar ganancias en PDF |
+| GET | `/reportes/perdidas/excel` | Exportar pérdidas en Excel |
+| GET | `/reportes/perdidas/pdf` | Exportar pérdidas en PDF |
+
+Ejemplos de uso con filtros:
+```
+GET /reportes/ganancias?mes=4&anio=2026   → Abril 2026
+GET /reportes/ganancias?anio=2026         → Todo el año 2026
+GET /reportes/ganancias?mes=4             → Todos los abriles
+GET /reportes/ganancias                   → Todos los periodos
+```
 
 ---
 
@@ -136,6 +192,8 @@ db.close()
 - Tokens almacenados en base de datos para poder invalidarlos en logout
 - Todos los endpoints protegidos requieren token válido en el header
 - Control de roles (admin/usuario) con respuesta 403 para accesos no autorizados
+- Claves secretas gestionadas mediante variables de entorno — nunca hardcodeadas en el código
+- CORS configurado para permitir solo el origen del frontend
 
 ---
 
@@ -150,6 +208,21 @@ Al crear un préstamo el sistema automáticamente:
 6. Descuenta el capital otorgado
 7. Registra el movimiento en el historial de capital
 
+Al renovar un préstamo el sistema:
+1. Verifica que el préstamo esté activo
+2. Calcula el saldo pendiente
+3. Descuenta el abono si hay uno
+4. Crea un nuevo préstamo con el saldo restante
+5. Marca el préstamo original como renovado
+6. Registra la relación en la tabla de renovaciones
+7. Genera nuevas cuotas
+
+Al marcar un préstamo como perdido el sistema:
+1. Verifica que el préstamo esté activo
+2. Registra la pérdida con el saldo pendiente como valor perdido
+3. Actualiza el estado del préstamo a perdido
+4. Registra el impacto en los movimientos de capital
+
 ---
 
 ## Estado del proyecto
@@ -161,15 +234,15 @@ Al crear un préstamo el sistema automáticamente:
 | Sistema de autenticación JWT | ✅ Completado |
 | CRUD de clientes | ✅ Completado |
 | CRUD de tipo de préstamos | ✅ Completado |
-| CRUD tipos de pago | 🔄 En progreso |
+| CRUD tipos de pago | ✅ Completado |
 | Registro de movimientos de capital | ✅ Completado |
 | Creación de préstamo con lógica financiera | ✅ Completado |
 | Generación de cuotas | ✅ Completado |
-| Renovación de préstamo | ⏳ Pendiente |
-| Préstamo Perdido | ⏳ Pendiente |
-| Registro de pagos | ⏳ Pendiente |
+| Renovación de préstamo | ✅ Completado |
+| Préstamo Perdido | ✅ Completado |
+| Registro de pagos | ✅ Completado |
 | Cálculo automático de mora | ⏳ Pendiente |
-| Reportes financieros + exportaciones | ⏳ Pendiente |
+| Reportes financieros + exportaciones | ✅ Completado |
 
 ### Semana 3 — Frontend
 | Tarea | Estado |
@@ -179,17 +252,10 @@ Al crear un préstamo el sistema automáticamente:
 
 ---
 
-## Variables de entorno recomendadas para producción
-
-```env
-SECRET_KEY=tu_clave_secreta_larga
-DATABASE_URL=mysql+pymysql://usuario:password@host/db
-```
-
----
-
 ## Notas de desarrollo
 
 - La base de datos SQLite se genera automáticamente al iniciar el servidor
 - El archivo `test.db` está excluido del repositorio vía `.gitignore`
+- El archivo `.env` está excluido del repositorio vía `.gitignore`
 - Para producción se recomienda migrar a MySQL o PostgreSQL
+- El CORS está configurado con `FRONTEND_URL` del `.env` — en desarrollo usa `http://localhost:3000`
