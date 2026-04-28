@@ -33,3 +33,4 @@ def renovar(prestamo_id: int, renovacion: RenovacionCreate, db: Session = Depend
 @router.post("/{prestamo_id}/marcar_perdido")
 def marcar_perdido(prestamo_id: int, datos: MarcarPerdidoRequest, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     return marcar_prestamo_perdido(db, prestamo_id, datos)
+

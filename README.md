@@ -13,6 +13,8 @@ Backend para sistema de gestión de préstamos personales desarrollado con **Fas
 - JWT con encriptación JWE (python-jose + jwcrypto)
 - bcrypt para hash de contraseñas
 - Pydantic para validación de datos
+- openpyxl para exportación Excel
+- reportlab para exportación PDF
 
 ---
 
@@ -103,6 +105,14 @@ El seed es seguro de ejecutar varias veces — no duplica datos existentes.
 | PUT | `/tipo_prestamo/{id}` | Actualizar tipo |
 | DELETE | `/tipo_prestamo/{id}` | Eliminar tipo |
 
+### Tipo de Pagos
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| POST | `/tipo_pagos` | Crear tipo de pago |
+| GET | `/tipo_pagos` | Listar tipos de pago activos |
+| PUT | `/tipo_pagos/{id}` | Actualizar tipo de pago |
+| DELETE | `/tipo_pagos/{id}` | Eliminar tipo de pago |
+
 ### Capital
 | Método | Endpoint | Descripción |
 |--------|----------|-------------|
@@ -115,6 +125,23 @@ El seed es seguro de ejecutar varias veces — no duplica datos existentes.
 | POST | `/prestamos` | Crear préstamo con cuotas automáticas |
 | GET | `/prestamos` | Listar préstamos activos |
 | POST | `/prestamos/{id}/renovar` | Renovar préstamo existente |
+| POST | `/prestamos/{id}/marcar_perdido` | Marcar préstamo como perdido |
+
+### Pagos
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| POST | `/pagos` | Registrar pago de cuota |
+| GET | `/pagos` | Listar pagos |
+
+### Reportes
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| GET | `/reportes/ganancias` | Reporte de ganancias en JSON |
+| GET | `/reportes/perdidas` | Reporte de pérdidas en JSON |
+| GET | `/reportes/ganancias/excel` | Exportar ganancias en Excel |
+| GET | `/reportes/ganancias/pdf` | Exportar ganancias en PDF |
+| GET | `/reportes/perdidas/excel` | Exportar pérdidas en Excel |
+| GET | `/reportes/perdidas/pdf` | Exportar pérdidas en PDF |
 
 ---
 
@@ -141,8 +168,6 @@ Al crear un préstamo el sistema automáticamente:
 6. Descuenta el capital otorgado
 7. Registra el movimiento en el historial de capital
 
----
-
 Al renovar un préstamo el sistema:
 1. Verifica que el préstamo esté activo
 2. Calcula el saldo pendiente
@@ -151,6 +176,12 @@ Al renovar un préstamo el sistema:
 5. Marca el préstamo original como renovado
 6. Registra la relación en la tabla de renovaciones
 7. Genera nuevas cuotas
+
+Al marcar un préstamo como perdido el sistema:
+1. Verifica que el préstamo esté activo
+2. Registra la pérdida con el saldo pendiente como valor perdido
+3. Actualiza el estado del préstamo a perdido
+4. Registra el impacto en los movimientos de capital
 
 ---
 
@@ -163,15 +194,15 @@ Al renovar un préstamo el sistema:
 | Sistema de autenticación JWT | ✅ Completado |
 | CRUD de clientes | ✅ Completado |
 | CRUD de tipo de préstamos | ✅ Completado |
-| CRUD tipos de pago | 🔄 En progreso |
+| CRUD tipos de pago | ✅ Completado |
 | Registro de movimientos de capital | ✅ Completado |
 | Creación de préstamo con lógica financiera | ✅ Completado |
 | Generación de cuotas | ✅ Completado |
 | Renovación de préstamo | ✅ Completado |
-| Préstamo Perdido | ⏳ Pendiente |
-| Registro de pagos | ⏳ Pendiente |
+| Préstamo Perdido | ✅ Completado |
+| Registro de pagos | ✅ Completado |
 | Cálculo automático de mora | ⏳ Pendiente |
-| Reportes financieros + exportaciones | ⏳ Pendiente |
+| Reportes financieros + exportaciones | ✅ Completado |
 
 ### Semana 3 — Frontend
 | Tarea | Estado |

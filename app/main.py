@@ -4,6 +4,7 @@ from app.db.database import init_db
 from app.routes.auth import router as auth_router
 from app.routes.capital import router as capital_router
 from app.routes.prestamo import router as prestamo_router
+from app.routes.reporte import router as reporte_router
 
 app = FastAPI()
 @app.on_event("startup")
@@ -21,5 +22,5 @@ app.include_router(capital_router)
 app.include_router(prestamo_router)
 app.include_router(tipo_pago.router)
 app.include_router(pago.router)
-
+app.include_router(reporte_router)
 
