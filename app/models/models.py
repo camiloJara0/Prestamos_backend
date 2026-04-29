@@ -79,7 +79,7 @@ class PrestamoCuota(Base):
     capital = Column(Float)
     interes = Column(Float)
     mora = Column(Float)
-    estado = Column(Enum("pendiente", "pagado", "vencido", name="estado_cuota"), default="pendiente")
+    estado = Column(Enum("pendiente", "pagado", "vencido", "parcial", name="estado_cuota"), default="pendiente")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

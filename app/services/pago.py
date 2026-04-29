@@ -30,6 +30,8 @@ def registrar_pago(db: Session, pago: PagoCreate):
     # Actualiza el estado de la cuota
     if pago.valor_pagado >= cuota.valor_cuota:
         cuota.estado = "pagado"
+    elif pago.valor_pagado > 0 and pago.valor_pagado < cuota.valor_cuota :
+        cuota.estado = "parcial"
     else:
         cuota.estado = "vencido"
 

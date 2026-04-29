@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.routes import clientes, tipo_prestamo, tipo_pago, pago
+from app.routes import clientes, tipo_prestamo, tipo_pago, pago, mora
 from app.db.database import init_db
 from app.routes.auth import router as auth_router
 from app.routes.capital import router as capital_router
@@ -21,5 +21,6 @@ app.include_router(capital_router)
 app.include_router(prestamo_router)
 app.include_router(tipo_pago.router)
 app.include_router(pago.router)
+app.include_router(mora.router)
 
 
