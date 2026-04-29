@@ -58,8 +58,17 @@ def logout(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme), d
     return {"mensaje": "Sesión cerrada correctamente"}
 
 @router.get("/me")
-def perfil(current_user: dict = Depends(get_current_user)):
-    return {"usuario": current_user}
+def perfil(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    usuario = db.query(Usuario).filter(Usuario.email == current_user["sub"]).first()
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    return {
+        "id": usuario.id,
+        "nombre": usuario.nombre,
+        "email": usuario.email,
+        "rol": usuario.rol,
+        "estado": usuario.estado
+    }
 
 @router.post("/refresh", response_model=TokenRefreshResponse)
 def refresh(data: TokenRefreshRequest, db: Session = Depends(get_db)):

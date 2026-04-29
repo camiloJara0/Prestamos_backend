@@ -33,7 +33,7 @@ def registrar_pago(db: Session, pago: PagoCreate):
     elif pago.valor_pagado > 0 and pago.valor_pagado < cuota.valor_cuota :
         cuota.estado = "parcial"
     else:
-        cuota.estado = "vencido"
+        cuota.estado = "pendiente"
 
     # Actualiza el saldo pendiente del préstamo
     prestamo = db.query(Prestamo).filter(Prestamo.id == pago.prestamo_id).first()
@@ -56,3 +56,4 @@ def registrar_pago(db: Session, pago: PagoCreate):
 
 def get_pagos(db: Session, skip: int = 0, limit: int = 10):
     return db.query(Pago).offset(skip).limit(limit).all()
+

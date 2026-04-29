@@ -5,8 +5,8 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from app.db.database import SessionLocal
-from app.schemas.prestamo import PrestamoCreate, PrestamoOut
-from app.services.prestamo import crear_prestamo, get_prestamos
+from app.schemas.prestamo import PrestamoCreate, PrestamoOut, RenovacionCreate, MarcarPerdidoRequest
+from app.services.prestamo import crear_prestamo, get_prestamos, renovar_prestamo, marcar_prestamo_perdido
 from app.dependencies.auth import get_current_user
 
 router = APIRouter(prefix="/prestamos", tags=["Prestamos"])
@@ -25,4 +25,12 @@ def crear(prestamo: PrestamoCreate, db: Session = Depends(get_db), current_user:
 @router.get("/", response_model=list[PrestamoOut])
 def listar(skip: int = 0, limit: int = 10, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     return get_prestamos(db, skip, limit)
+
+@router.post("/{prestamo_id}/renovar", response_model=PrestamoOut)
+def renovar(prestamo_id: int, renovacion: RenovacionCreate, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    return renovar_prestamo(db, prestamo_id, renovacion)
+
+@router.post("/{prestamo_id}/marcar_perdido")
+def marcar_perdido(prestamo_id: int, datos: MarcarPerdidoRequest, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    return marcar_prestamo_perdido(db, prestamo_id, datos)
 
