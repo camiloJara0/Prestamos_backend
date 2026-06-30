@@ -8,9 +8,11 @@ import os
 load_dotenv()
 
 # Base de datos SQLite para desarrollo y pruebas. En produccion se cambiara a MySQL
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./test.db")
+# DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./test.db")
+DATABASE_URL = "mysql+pymysql://root:@localhost/prestamos"  # Cambiar a la URL de tu base de datos MySQL
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+
+engine = create_engine(DATABASE_URL, echo=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db():

@@ -19,9 +19,18 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+allowed_origins = [
+    "http://localhost",
+    "http://localhost:3000",
+]
+
+fronted_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+if fronted_url not in allowed_origins:
+    allowed_origins.append(fronted_url)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.getenv("FRONTEND_URL", "*")],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
