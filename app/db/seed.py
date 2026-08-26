@@ -2,7 +2,7 @@
 # Ejecutar con: python -m app.db.seed
 
 from app.db.database import SessionLocal, init_db
-from app.models.models import Usuario, TipoPrestamo, Cliente, MovimientoCapital, Capital
+from app.models.models import Usuario, TipoPrestamo, Cliente, MovimientoCapital, Capital, ConfiguracionSistema
 from app.core.security import hash_password
 from datetime import date
 
@@ -70,6 +70,36 @@ def seed():
             print("Capital inicial de 10,000,000 creado")
         else:
             print("- Capital ya existe")
+
+        # Crear configuraciones del sistema
+        configs = [
+            {
+                "clave": "tasa_mora_diaria",
+                "valor": "0.5",
+                "descripcion": "Porcentaje de mora diaria por cuota vencida",
+                "tipo_valor": "float"
+            },
+            {
+                "clave": "interes_minimo",
+                "valor": "2.5",
+                "descripcion": "Tasa de interés mínima por defecto para nuevos préstamos",
+                "tipo_valor": "float"
+            },
+            {
+                "clave": "dias_gracia_mora",
+                "valor": "3",
+                "descripcion": "Días de gracia antes de aplicar mora",
+                "tipo_valor": "int"
+            },
+        ]
+        for cfg in configs:
+            if not db.query(ConfiguracionSistema).filter(ConfiguracionSistema.clave == cfg["clave"]).first():
+                db.add(ConfiguracionSistema(**cfg))
+                print(f"Configuración '{cfg['clave']}' creada")
+            else:
+                print(f"- Configuración '{cfg['clave']}' ya existe")
+
+        db.commit()
 
         print("\nSeed completado exitosamente")
         print("   Email: admin@test.com")

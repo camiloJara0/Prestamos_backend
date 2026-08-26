@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    Column, Integer, String, Float, Date, DateTime, ForeignKey, Enum, Text
+    Boolean, Column, Integer, String, Float, Date, DateTime, ForeignKey, Enum, Text
 )
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -76,6 +76,7 @@ class PrestamoCuota(Base):
     numero_cuota = Column(Integer)
     fecha_vencimiento = Column(Date)
     valor_cuota = Column(Float)
+    monto_interes = Column(Float, default=0.0)  # Interés de esta cuota
     capital = Column(Float)
     interes = Column(Float)
     mora = Column(Float)
@@ -85,7 +86,6 @@ class PrestamoCuota(Base):
 
     prestamo = relationship("Prestamo", back_populates="cuotas")
     pagos = relationship("Pago", back_populates="cuota")
-
 
 class TipoPago(Base):
     __tablename__ = "tipos_pago"
@@ -203,3 +203,18 @@ class Capital(Base):
     id = Column(Integer, primary_key=True, index=True)
     monto_total = Column(Float, default=0.0)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class ConfiguracionSistema(Base):
+    __tablename__ = "configuracion_sistema"
+
+    id = Column(Integer, primary_key=True, index=True)
+    clave = Column(String(100), unique=True, nullable=False)  # ej: "tasa_mora_diaria", "interes_minimo"
+    valor = Column(String(255), nullable=False)  # El valor como string
+    descripcion = Column(Text)  # Descripción de qué es
+    tipo_valor = Column(String(50), default="float")  # float, int, string, boolean
+    activo = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<ConfiguracionSistema(clave={self.clave}, valor={self.valor})>"
