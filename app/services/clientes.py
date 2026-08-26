@@ -38,6 +38,6 @@ def update_cliente(db: Session, cliente_id: int, cliente: ClienteUpdate):
 def delete_cliente(db: Session, cliente_id: int):
     db_cliente = get_cliente(db, cliente_id)
     if db_cliente:
-        db.delete(db_cliente)
+        db_cliente.estado = "inactivo"  # soft-delete: preserva referencias historicas
         db.commit()
     return db_cliente

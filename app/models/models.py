@@ -93,6 +93,9 @@ class TipoPago(Base):
     id = Column(Integer, primary_key=True, index=True)
     nombre = Column(String(50), nullable=False)
     descripcion = Column(Text)
+    estado = Column(Enum("activo", "inactivo", name="estado_tipo_pago"), default="activo")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     pagos = relationship("Pago", back_populates="tipo_pago")
 

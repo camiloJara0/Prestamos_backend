@@ -12,6 +12,8 @@ from jwcrypto import jwk, jwe
 from jwcrypto.common import json_encode
 from dotenv import load_dotenv
 import os
+import hashlib
+import base64
 import json
 
 load_dotenv()
@@ -21,7 +23,30 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 REFRESH_TOKEN_EXPIRE_DAYS = 7
 
-ENCRYPTION_KEY = jwk.JWK(kty="oct", k=SECRET_KEY[:43])
+
+def _build_encryption_key() -> jwk.JWK:
+    """Construye una clave JWE determinística para que las sesiones sobrevivan reinicios.
+
+    Prioridad:
+      1. ENCRYPTION_KEY en formato JOSE JSON ({"k": "...", "kty": "oct"}).
+      2. ENCRYPTION_KEY en texto plano (se deriva con SHA-256).
+      3. Derivación desde SECRET_KEY.
+    """
+    env_key = os.getenv("ENCRYPTION_KEY")
+    if env_key:
+        try:
+            return jwk.JWK.from_json(env_key)
+        except Exception:
+            pass
+        seed = env_key
+    else:
+        seed = SECRET_KEY or "cambia-esta-clave"
+    digest = hashlib.sha256(seed.encode("utf-8")).digest()
+    k = base64.urlsafe_b64encode(digest).decode("utf-8").rstrip("=")
+    return jwk.JWK(kty="oct", k=k)
+
+
+ENCRYPTION_KEY = _build_encryption_key()
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 

@@ -1,11 +1,9 @@
-# Seed : crea datos de prueba predeterminados en la base de datos
+﻿# Seed : crea datos de prueba predeterminados en la base de datos
 # Ejecutar con: python -m app.db.seed
 
 from app.db.database import SessionLocal, init_db
-from app.models.models import Usuario, TipoPrestamo, Cliente
+from app.models.models import Usuario, TipoPrestamo, Cliente, MovimientoCapital, Capital
 from app.core.security import hash_password
-from app.services.capital import get_or_create_capital
-from app.models.models import MovimientoCapital, Capital
 from datetime import date
 
 def seed():
@@ -23,7 +21,7 @@ def seed():
                 estado="activo"
             )
             db.add(usuario)
-            print("✓ Usuario admin creado")
+            print("Usuario admin creado")
         else:
             print("- Usuario admin ya existe")
 
@@ -36,7 +34,7 @@ def seed():
         for t in tipos:
             if not db.query(TipoPrestamo).filter(TipoPrestamo.nombre == t["nombre"]).first():
                 db.add(TipoPrestamo(**t, estado="activo"))
-                print(f"✓ Tipo de préstamo '{t['nombre']}' creado")
+                print(f"Tipo de préstamo '{t['nombre']}' creado")
             else:
                 print(f"- Tipo de préstamo '{t['nombre']}' ya existe")
 
@@ -50,7 +48,7 @@ def seed():
                 estado="activo"
             )
             db.add(cliente)
-            print("✓ Cliente de prueba creado")
+            print("Cliente de prueba creado")
         else:
             print("- Cliente de prueba ya existe")
 
@@ -69,17 +67,17 @@ def seed():
             )
             db.add(movimiento)
             db.commit()
-            print("✓ Capital inicial de 10,000,000 creado")
+            print("Capital inicial de 10,000,000 creado")
         else:
             print("- Capital ya existe")
 
-        print("\n✅ Seed completado exitosamente")
+        print("\nSeed completado exitosamente")
         print("   Email: admin@test.com")
         print("   Password: 123456")
 
     except Exception as e:
         db.rollback()
-        print(f"❌ Error en seed: {e}")
+        print(f"[ERROR] Error en seed: {e}")
     finally:
         db.close()
 

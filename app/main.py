@@ -16,9 +16,21 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# Creamos una lista limpia de orígenes permitidos
+allowed_origins = [
+    "http://localhost:3001",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
+# Si existe la variable de entorno, la sumamos a la lista
+frontend_url = os.getenv("FRONTEND_URL")
+if frontend_url:
+    allowed_origins.append(frontend_url)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.getenv("FRONTEND_URL", "*")],
+    allow_origins=allowed_origins, # Usamos nuestra lista segura
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

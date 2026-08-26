@@ -7,7 +7,10 @@ from datetime import date
 
 
 def get_moras(db: Session, skip: int = 0, limit: int = 10):
-    return db.query(Mora).filter(Mora.estado == "activo").offset(skip).limit(limit).all() # Solo moras activos
+    return db.query(Mora).filter(Mora.estado == "generada").order_by(Mora.fecha.desc()).offset(skip).limit(limit).all()  # Solo moras generadas
+
+def get_moras_prestamo(db: Session, prestamo_id: int):
+    return db.query(Mora).filter(Mora.prestamo_id == prestamo_id).order_by(Mora.fecha.desc()).all()
 
 def get_mora(db: Session, mora_id: int):
     return db.query(Mora).filter(Mora.id == mora_id).first()
