@@ -28,6 +28,6 @@ def update_tipo_prestamo(db: Session, tipo_prestamo_id: int, tipo_prestamo: Tipo
 def delete_tipo_prestamo(db: Session, tipo_prestamo_id: int):
     db_tipo_prestamo = get_tipo_prestamo(db, tipo_prestamo_id)
     if db_tipo_prestamo:
-        db.delete(db_tipo_prestamo)
+        db_tipo_prestamo.estado = "inactivo"  # soft-delete
         db.commit()
     return db_tipo_prestamo

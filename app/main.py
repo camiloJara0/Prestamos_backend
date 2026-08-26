@@ -1,13 +1,10 @@
 from fastapi import FastAPI
+from app.routes import clientes, tipo_prestamo, tipo_pago, pago, mora, capital, prestamo, reporte
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
-from app.routes import clientes, tipo_prestamo, tipo_pago, pago
 from app.db.database import init_db
 from app.routes.auth import router as auth_router
-from app.routes.capital import router as capital_router
-from app.routes.prestamo import router as prestamo_router
-from app.routes.reporte import router as reporte_router
 import os
 
 load_dotenv()
@@ -19,18 +16,21 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# Creamos una lista limpia de orígenes permitidos
 allowed_origins = [
-    "http://localhost",
+    "http://localhost:3001",
     "http://localhost:3000",
+    "http://127.0.0.1:3000",
 ]
 
-fronted_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
-if fronted_url not in allowed_origins:
-    allowed_origins.append(fronted_url)
+# Si existe la variable de entorno, la sumamos a la lista
+frontend_url = os.getenv("FRONTEND_URL")
+if frontend_url:
+    allowed_origins.append(frontend_url)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
+    allow_origins=allowed_origins, # Usamos nuestra lista segura
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -43,8 +43,9 @@ def read_root():
 app.include_router(clientes.router)
 app.include_router(tipo_prestamo.router)
 app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
-app.include_router(capital_router)
-app.include_router(prestamo_router)
+app.include_router(capital.router)
+app.include_router(prestamo.router)
 app.include_router(tipo_pago.router)
 app.include_router(pago.router)
-app.include_router(reporte_router)
+app.include_router(mora.router)
+app.include_router(reporte.router)

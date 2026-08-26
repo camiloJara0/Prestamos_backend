@@ -1,6 +1,10 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import date
+
+from app.schemas.clientes import ClienteOut
+from app.schemas.tipo_prestamo import TipoPrestamoOut
+from app.schemas.pago import PagoOut
 
 class PrestamoCreate(BaseModel):
     cliente_id: int
@@ -28,6 +32,28 @@ class PrestamoOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+class CuotaOut(BaseModel):
+    id: int
+    prestamo_id: int
+    numero_cuota: int
+    fecha_vencimiento: date
+    valor_cuota: float
+    capital: float
+    interes: float
+    mora: float
+    estado: str
+
+    class Config:
+        from_attributes = True
+
+
+class PrestamoDetalleOut(PrestamoOut):
+    cliente: Optional[ClienteOut] = None
+    tipo_prestamo: Optional[TipoPrestamoOut] = None
+    cuotas: list[CuotaOut] = Field(default_factory=list)
+    pagos: list[PagoOut] = Field(default_factory=list)
+
 
 class RenovacionCreate(BaseModel):
     porcentaje_interes: float

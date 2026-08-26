@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException
 from datetime import date
 from dateutil.relativedelta import relativedelta
-from app.models.models import Prestamo, PrestamoCuota, MovimientoCapital, Capital
+from sqlalchemy import or_
+from app.models.models import Prestamo, PrestamoCuota, MovimientoCapital, Capital, Cliente
 from app.schemas.prestamo import PrestamoCreate
 from app.services.capital import get_or_create_capital
 
@@ -78,8 +79,35 @@ def crear_prestamo(db: Session, prestamo: PrestamoCreate):
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error al crear el prestamo: {str(e)}")
 
-def get_prestamos(db: Session, skip: int = 0, limit: int = 10):
-    return db.query(Prestamo).filter(Prestamo.estado == "activo").offset(skip).limit(limit).all()
+def get_prestamos(db: Session, skip: int = 0, limit: int = 10, estado: str = "activo",
+                  cliente_id: int = None, fecha_desde: date = None, fecha_hasta: date = None,
+                  busqueda: str = None):
+    """Lista préstamos con filtros.
+
+    - estado: "activo" (default) o cualquier estado ("pagado", "perdido", "renovado"). Usar "todos" para todos.
+    - cliente_id: filtra por cliente.
+    - fecha_desde / fecha_hasta: rango de fechas de otorgamiento.
+    - busqueda: busca por nombre o cédula del cliente.
+    """
+    query = db.query(Prestamo)
+    if estado and estado != "todos":
+        query = query.filter(Prestamo.estado == estado)
+    if cliente_id:
+        query = query.filter(Prestamo.cliente_id == cliente_id)
+    if fecha_desde:
+        query = query.filter(Prestamo.fecha_prestamo >= fecha_desde)
+    if fecha_hasta:
+        query = query.filter(Prestamo.fecha_prestamo <= fecha_hasta)
+    if busqueda:
+        query = query.join(Cliente).filter(
+            or_(Cliente.nombre.ilike(f"%{busqueda}%"), Cliente.cedula.ilike(f"%{busqueda}%"))
+        )
+    return query.order_by(Prestamo.id.desc()).offset(skip).limit(limit).all()
+
+
+def obtener_prestamo(db: Session, prestamo_id: int):
+    """Devuelve un préstamo con sus relaciones cargadas (cliente, tipo, cuotas y pagos)."""
+    return db.query(Prestamo).filter(Prestamo.id == prestamo_id).first()
 
 def renovar_prestamo(db: Session, prestamo_id: int, renovacion):
     # Obtiene el prestamo original y valida que exista y este activo
