@@ -48,3 +48,75 @@ def eliminar_mora(mora_id: int, db: Session = Depends(get_db), current_user: dic
 def ejecutar_moras(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     moras = services.procesar_moras(db, tasa_diaria=0.01)
     return {"moras_actualizadas": [m.id for m in moras]}
+
+from app.services.configuracion import (
+    get_todas_configuraciones, 
+    get_configuracion_por_clave, 
+    actualizar_configuracion
+)
+from app.schemas.configuracion import ConfiguracionUpdate
+
+# ... endpoints de mora que ya existen ...
+
+# ========== ENDPOINTS DE CONFIGURACIÓN DEL SISTEMA ==========
+
+@router.get("/config/todas")
+def obtener_todas_configuraciones(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """Obtiene todas las configuraciones activas del sistema"""
+    configs = get_todas_configuraciones(db)
+    return {
+        "total": len(configs),
+        "configuraciones": [
+            {
+                "id": c.id,
+                "clave": c.clave,
+                "valor": c.valor,
+                "descripcion": c.descripcion,
+                "tipo_valor": c.tipo_valor,
+                "activo": c.activo
+            }
+            for c in configs
+        ]
+    }
+
+@router.get("/config/{clave}")
+def obtener_configuracion_por_clave(
+    clave: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """Obtiene una configuración específica por su clave"""
+    config = get_configuracion_por_clave(db, clave)
+    return {
+        "id": config.id,
+        "clave": config.clave,
+        "valor": config.valor,
+        "descripcion": config.descripcion,
+        "tipo_valor": config.tipo_valor,
+        "activo": config.activo
+    }
+
+@router.put("/config/{clave}")
+def actualizar_config(
+    clave: str,
+    datos: ConfiguracionUpdate,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """Actualiza una configuración específica (solo admins)"""
+    if current_user["rol"] != "admin":
+        raise HTTPException(status_code=403, detail="Solo administradores pueden modificar configuraciones")
+    
+    config = actualizar_configuracion(db, clave, datos)
+    return {
+        "id": config.id,
+        "clave": config.clave,
+        "valor": config.valor,
+        "descripcion": config.descripcion,
+        "tipo_valor": config.tipo_valor,
+        "activo": config.activo,
+        "mensaje": "Configuración actualizada exitosamente"
+    }
