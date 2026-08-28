@@ -1,3 +1,146 @@
+
+## Avance
+
+### FASE 1 ✅ COMPLETADA
+#### 1. Agregar `saldo_pendiente` a tabla `prestamos` ✅ REALIZADA
+- Campo agregado exitosamente a la tabla `prestamos`
+- Se utiliza para rastrear el monto que falta por pagar en cada préstamo
+- Se actualiza automáticamente cuando se registran pagos
+
+#### 2. Agregar `monto_interes` y `estado` a tabla `prestamos_cuota` ✅ REALIZADA
+- Campo `monto_interes`: registra el interés correspondiente a cada cuota individual
+- Campo `estado`: ahora usa Enum con valores: "pendiente", "pagado", "vencido", "parcial"
+- Permite un mejor control del estado de cada cuota
+
+#### 3. Crear tabla `configuracion_sistema` ✅ REALIZADA
+- Nueva tabla para almacenar parámetros globales del sistema
+- Estructura:
+  - `clave`: identificador único (ej: "tasa_mora_diaria")
+  - `valor`: valor de la configuración
+  - `descripcion`: descripción del parámetro
+  - `tipo_valor`: tipo de dato (float, int, string, boolean)
+  - `activo`: booleano para habilitar/deshabilitar
+- Seed inicial con 3 configuraciones:
+  - `tasa_mora_diaria`: 0.5 (porcentaje diario de mora)
+  - `interes_minimo`: 2.5 (tasa mínima de interés)
+  - `dias_gracia_mora`: 3 (días antes de aplicar mora)
+
+---
+
+### FASE 2 ✅ COMPLETADA
+#### 4. Endpoints GET/PUT `/mora/config` ✅ REALIZADA
+
+**Cómo usar los endpoints de configuración:**
+
+**GET `/moras/config/todas`**
+- Obtiene todas las configuraciones activas del sistema
+- No requiere parámetros
+- Respuesta: lista de todas las configuraciones con sus valores actuales
+- Útil para ver el estado completo de todos los parámetros
+
+**GET `/moras/config/{clave}`**
+- Obtiene una configuración específica por su clave
+- Parámetro: `clave` (string) — ejemplo: "tasa_mora_diaria"
+- Respuesta: la configuración solicitada con su valor actual
+- Ejemplo de uso: si necesitas obtener solo la tasa de mora diaria, usas `GET /moras/config/tasa_mora_diaria`
+
+**PUT `/moras/config/{clave}`**
+- Actualiza una configuración existente
+- Parámetro: `clave` (string) — ejemplo: "tasa_mora_diaria"
+- Body JSON:
+  ```json
+  {
+    "valor": "1.5",
+    "descripcion": "Nueva descripción (opcional)"
+  }
+  ```
+- Respuesta: la configuración actualizada con el nuevo valor
+- Nota: Solo administradores pueden actualizar configuraciones
+- Ejemplo: cambiar la tasa de mora de 0.5 a 1.5 diario
+
+---
+
+### FASE 3 ⏳ PENDIENTE
+#### 5. Mejorar lógica de mora en `app/services/mora.py`
+
+**Descripción:**
+Actualizar la función `procesar_moras()` para:
+- Leer automáticamente los parámetros de `configuracion_sistema` en lugar de valores hardcodeados
+- Usar `tasa_mora_diaria` para calcular mora
+- Respetar `dias_gracia_mora` antes de aplicar mora
+- Aplicar mora solo a cuotas en estado "vencido" o "parcial"
+
+**Pasos:**
+1. Modificar `app/services/mora.py` para que lea de `ConfiguracionSistema`
+2. Actualizar el cálculo de mora dinámicamente
+3. Registrar las moras calculadas en la tabla `mora`
+
+---
+
+### FASE 4 ⏳ PENDIENTE
+#### 6. Validar cuotas vencidas antes de crear préstamos
+
+**Descripción:**
+Antes de crear un nuevo préstamo, validar que el cliente no tenga cuotas vencidas sin pagar.
+- Prevenir sobreendeudamiento
+- Garantizar que haya capacidad de pago
+
+#### 7. Endpoint PUT `/prestamos/{id}/ajustar-capital`
+
+**Descripción:**
+Endpoint para correcciones si hay errores en el cálculo del capital.
+- Requiere rol de admin
+- Permite ajustar el capital de un préstamo
+- Recalcula todas las cuotas automáticamente
+
+---
+
+### FASE 5 ⏳ PENDIENTE
+#### 8. Reporte de cobranza
+
+**Descripción:**
+Reporte que muestre:
+- Cuotas por vencer (próximos 7 días)
+- Cuotas vencidas (sin pagar)
+- Cuotas pagadas (este período)
+- Monto total a cobrar
+- Monto cobrado vs. pendiente
+
+#### 9. Reporte de cartera
+
+**Descripción:**
+Reporte que muestre:
+- Préstamos activos (cantidad y monto total)
+- Préstamos renovados (cantidad y monto)
+- Préstamos perdidos (cantidad y pérdida total)
+- Gráficos de distribución
+
+---
+
+### FASE 6 ⏳ PENDIENTE (Baja prioridad)
+#### 10. Crear tabla `auditoria` y registrar cambios
+#### 11. Endpoint GET `/auditoria`
+#### 12. Reportes por rango de fechas
+#### 13. API Pública (sin autenticación)
+
+---
+
+## Notas Importantes
+
+- Todos los endpoints requieren autenticación JWT excepto los de FASE 6
+- Las configuraciones solo pueden ser modificadas por administradores
+- Los cambios en `configuracion_sistema` se aplican inmediatamente a nuevos cálculos de mora
+- Mantener commits limpios y descriptivos
+- Usar convenciones: `feat:`, `fix:`, `refactor:` en los mensajes
+
+
+
+
+
+
+
+
+
 # Backend — Endpoints y funcionalidades faltantes
 
 Documento de requerimientos para el backend de LoanSoft (`prestamos_backend`).
