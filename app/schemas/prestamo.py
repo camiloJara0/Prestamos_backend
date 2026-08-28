@@ -9,10 +9,10 @@ from app.schemas.pago import PagoOut
 class PrestamoCreate(BaseModel):
     cliente_id: int
     tipo_prestamo_id: int
-    fecha_prestamo: date
     capital_prestado: float
     porcentaje_interes: float
     numero_cuotas: int
+    fecha_prestamo: Optional[date] = None
     observaciones: Optional[str] = None
 
 class PrestamoOut(BaseModel):
