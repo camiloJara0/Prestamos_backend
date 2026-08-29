@@ -176,6 +176,7 @@ class Usuario(Base):
     hashed_password = Column(String(255), nullable=False)
     rol = Column(Enum("admin", "usuario", name="rol_usuario"), default="usuario")
     estado = Column(Enum("activo", "inactivo", name="estado_usuario"), default="activo")
+    auditorias = relationship("Auditoria", back_populates="usuario")
     created_at = Column(DateTime, default=datetime.utcnow)
 
     tokens = relationship("Token", back_populates="usuario")
@@ -218,3 +219,22 @@ class ConfiguracionSistema(Base):
 
     def __repr__(self):
         return f"<ConfiguracionSistema(clave={self.clave}, valor={self.valor})>"
+
+class Auditoria(Base):
+    __tablename__ = "auditoria"
+
+    id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"))
+    tabla_afectada = Column(String(100), nullable=False)  # ej: "prestamos", "pagos"
+    tipo_operacion = Column(String(50), nullable=False)  # CREATE, UPDATE, DELETE
+    registro_id = Column(Integer)  # ID del registro afectado
+    valores_anteriores = Column(Text)  # JSON con valores antes del cambio
+    valores_nuevos = Column(Text)  # JSON con valores después del cambio
+    descripcion = Column(Text)
+    ip_address = Column(String(50))
+    fecha = Column(DateTime, default=datetime.utcnow)
+    
+    usuario = relationship("Usuario", back_populates="auditorias")
+
+    def __repr__(self):
+        return f"<Auditoria(tabla={self.tabla_afectada}, operacion={self.tipo_operacion}, fecha={self.fecha})>"

@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from app.db.database import init_db
 from app.routes.auth import router as auth_router
+from app.routes.auditoria import router as auditoria_router
 import os
 
 load_dotenv()
@@ -49,3 +50,4 @@ app.include_router(tipo_pago.router)
 app.include_router(pago.router)
 app.include_router(mora.router)
 app.include_router(reporte.router)
+app.include_router(auditoria_router)
