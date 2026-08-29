@@ -5,8 +5,8 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import extract
 from typing import Optional
-from app.models.models import MovimientoCapital, Prestamo, PrestamoPerdido, Pago
-from datetime import date
+from app.models.models import MovimientoCapital, Prestamo, PrestamoPerdido, Pago, Cliente, PrestamoCuota
+from datetime import date, timedelta
 
 def _filtrar_movimientos(query, mes, anio):
     if mes:
@@ -458,3 +458,114 @@ def exportar_pdf(db: Session, tipo: str, mes: Optional[int] = None, anio: Option
     doc.build(story)
     buffer.seek(0)
     return buffer
+
+def get_reporte_cobranza(db: Session, mes: Optional[int] = None, anio: Optional[int] = None):
+    """Genera reporte de cobranza con cuotas por vencer, vencidas y pagadas"""
+    
+    today = date.today()
+    
+    # Cuotas por vencer (próximos 7 días, no vencidas aún)
+    fecha_inicio_por_vencer = today
+    fecha_fin_por_vencer = today + timedelta(days=7)
+    
+    cuotas_por_vencer = db.query(PrestamoCuota).join(Prestamo).join(Cliente).filter(
+        PrestamoCuota.estado.in_(["pendiente", "parcial"]),
+        PrestamoCuota.fecha_vencimiento >= fecha_inicio_por_vencer,
+        PrestamoCuota.fecha_vencimiento <= fecha_fin_por_vencer
+    ).all()
+    
+    # Cuotas vencidas (sin pagar, vencidas hace más de 0 días)
+    cuotas_vencidas = db.query(PrestamoCuota).join(Prestamo).join(Cliente).filter(
+        PrestamoCuota.estado.in_(["vencido", "parcial"]),
+        PrestamoCuota.fecha_vencimiento < today
+    ).all()
+    
+    # Cuotas pagadas
+    cuotas_pagadas = db.query(PrestamoCuota).join(Prestamo).join(Cliente).filter(
+        PrestamoCuota.estado == "pagado"
+    ).all()
+    
+    # Aplicar filtros de fecha si se proporcionan
+    if mes or anio:
+        cuotas_por_vencer = [c for c in cuotas_por_vencer if (mes is None or c.fecha_vencimiento.month == mes) and (anio is None or c.fecha_vencimiento.year == anio)]
+        cuotas_vencidas = [c for c in cuotas_vencidas if (mes is None or c.fecha_vencimiento.month == mes) and (anio is None or c.fecha_vencimiento.year == anio)]
+        cuotas_pagadas = [c for c in cuotas_pagadas if (mes is None or c.fecha_vencimiento.month == mes) and (anio is None or c.fecha_vencimiento.year == anio)]
+    
+    return {
+        "periodo": _label_periodo(mes, anio),
+        "total_cuotas_por_vencer": len(cuotas_por_vencer),
+        "monto_por_vencer": sum(c.valor_cuota for c in cuotas_por_vencer),
+        "total_cuotas_vencidas": len(cuotas_vencidas),
+        "monto_vencido": sum(c.valor_cuota for c in cuotas_vencidas),
+        "total_cuotas_pagadas": len(cuotas_pagadas),
+        "monto_pagado": sum(c.valor_cuota for c in cuotas_pagadas),
+        "cuotas_por_vencer": [
+            {
+                "cuota_id": c.id,
+                "prestamo_id": c.prestamo_id,
+                "cliente_nombre": c.prestamo.cliente.nombre,
+                "numero_cuota": c.numero_cuota,
+                "fecha_vencimiento": str(c.fecha_vencimiento),
+                "valor_cuota": c.valor_cuota,
+                "estado": c.estado,
+                "dias_atraso": 0
+            } for c in cuotas_por_vencer
+        ],
+        "cuotas_vencidas": [
+            {
+                "cuota_id": c.id,
+                "prestamo_id": c.prestamo_id,
+                "cliente_nombre": c.prestamo.cliente.nombre,
+                "numero_cuota": c.numero_cuota,
+                "fecha_vencimiento": str(c.fecha_vencimiento),
+                "valor_cuota": c.valor_cuota,
+                "estado": c.estado,
+                "dias_atraso": (today - c.fecha_vencimiento).days
+            } for c in cuotas_vencidas
+        ],
+        "cuotas_pagadas": [
+            {
+                "cuota_id": c.id,
+                "prestamo_id": c.prestamo_id,
+                "cliente_nombre": c.prestamo.cliente.nombre,
+                "numero_cuota": c.numero_cuota,
+                "fecha_vencimiento": str(c.fecha_vencimiento),
+                "valor_cuota": c.valor_cuota,
+                "estado": c.estado,
+                "dias_atraso": 0
+            } for c in cuotas_pagadas
+        ]
+    }
+
+
+def get_reporte_cartera(db: Session, mes: Optional[int] = None, anio: Optional[int] = None):
+    """Genera reporte de cartera con distribución de préstamos por estado"""
+    
+    # Préstamos activos
+    prestamos_activos = db.query(Prestamo).filter(Prestamo.estado == "activo").all()
+    
+    # Préstamos renovados
+    prestamos_renovados = db.query(Prestamo).filter(Prestamo.estado == "renovado").all()
+    
+    # Préstamos perdidos
+    prestamos_perdidos = db.query(Prestamo).filter(Prestamo.estado == "perdido").all()
+    
+    # Distribución por tipo de préstamo
+    distribucion = {}
+    for p in prestamos_activos + prestamos_renovados + prestamos_perdidos:
+        tipo = p.tipo_prestamo.nombre if p.tipo_prestamo else "Desconocido"
+        if tipo not in distribucion:
+            distribucion[tipo] = {"cantidad": 0, "monto": 0}
+        distribucion[tipo]["cantidad"] += 1
+        distribucion[tipo]["monto"] += p.capital_prestado
+    
+    return {
+        "periodo": _label_periodo(mes, anio),
+        "total_activos": len(prestamos_activos),
+        "monto_activos": sum(p.capital_prestado for p in prestamos_activos),
+        "total_renovados": len(prestamos_renovados),
+        "monto_renovados": sum(p.capital_prestado for p in prestamos_renovados),
+        "total_perdidos": len(prestamos_perdidos),
+        "monto_perdidos": sum(p.capital_prestado for p in prestamos_perdidos),
+        "distribucion_por_tipo": distribucion
+    }

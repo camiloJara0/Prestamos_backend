@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import Optional
 from app.db.database import SessionLocal
-from app.services.reporte import get_reporte_ganancias, get_reporte_perdidas, exportar_excel, exportar_pdf
+from app.services.reporte import get_reporte_cobranza, get_reporte_cartera, get_reporte_ganancias, get_reporte_perdidas, exportar_excel, exportar_pdf
 from app.dependencies.auth import get_current_user
 
 router = APIRouter(prefix="/reportes", tags=["Reportes"])
@@ -98,3 +98,23 @@ def perdidas_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": "attachment; filename=perdidas.pdf"}
     )
+
+@router.get("/cobranza")
+def reporte_cobranza(
+    mes: Optional[int] = Query(None, description="Mes (1-12)"),
+    anio: Optional[int] = Query(None, description="Año (ej: 2026)"),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """Reporte de cobranza: cuotas por vencer, vencidas y pagadas"""
+    return get_reporte_cobranza(db, mes=mes, anio=anio)
+
+@router.get("/cartera")
+def reporte_cartera(
+    mes: Optional[int] = Query(None, description="Mes (1-12)"),
+    anio: Optional[int] = Query(None, description="Año (ej: 2026)"),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """Reporte de cartera: préstamos activos, renovados y perdidos"""
+    return get_reporte_cartera(db, mes=mes, anio=anio)
