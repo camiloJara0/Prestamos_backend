@@ -5,15 +5,20 @@
 # GET /reportes/ganancias/pdf : exportar ganancias en PDF
 # GET /reportes/perdidas/excel : exportar perdidas en Excel
 # GET /reportes/perdidas/pdf : exportar perdidas en PDF
-# Todos los endpoints aceptan filtros opcionales: mes, anio
-# Si no se especifica ninguno devuelve todos los datos
+# GET /reportes/cobranza : reporte de cobranza en JSON
+# GET /reportes/cartera : reporte de cartera en JSON
+# Todos los endpoints aceptan filtros opcionales: desde, hasta
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import Optional
+from datetime import date
 from app.db.database import SessionLocal
-from app.services.reporte import get_reporte_cobranza, get_reporte_cartera, get_reporte_ganancias, get_reporte_perdidas, exportar_excel, exportar_pdf
+from app.services.reporte import (
+    get_reporte_ganancias, get_reporte_perdidas, exportar_excel, exportar_pdf,
+    get_reporte_cobranza, get_reporte_cartera
+)
 from app.dependencies.auth import get_current_user
 
 router = APIRouter(prefix="/reportes", tags=["Reportes"])
@@ -27,30 +32,30 @@ def get_db():
 
 @router.get("/ganancias")
 def reporte_ganancias(
-    mes: Optional[int] = Query(None, description="Mes (1-12)"),
-    anio: Optional[int] = Query(None, description="Año (ej: 2026)"),
+    desde: Optional[date] = Query(None, description="Fecha desde (ej: 2026-08-01)"),
+    hasta: Optional[date] = Query(None, description="Fecha hasta (ej: 2026-08-31)"),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    return get_reporte_ganancias(db, mes=mes, anio=anio)
+    return get_reporte_ganancias(db, desde=desde, hasta=hasta)
 
 @router.get("/perdidas")
 def reporte_perdidas(
-    mes: Optional[int] = Query(None, description="Mes (1-12)"),
-    anio: Optional[int] = Query(None, description="Año (ej: 2026)"),
+    desde: Optional[date] = Query(None, description="Fecha desde (ej: 2026-08-01)"),
+    hasta: Optional[date] = Query(None, description="Fecha hasta (ej: 2026-08-31)"),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    return get_reporte_perdidas(db, mes=mes, anio=anio)
+    return get_reporte_perdidas(db, desde=desde, hasta=hasta)
 
 @router.get("/ganancias/excel")
 def ganancias_excel(
-    mes: Optional[int] = Query(None, description="Mes (1-12)"),
-    anio: Optional[int] = Query(None, description="Año (ej: 2026)"),
+    desde: Optional[date] = Query(None, description="Fecha desde (ej: 2026-08-01)"),
+    hasta: Optional[date] = Query(None, description="Fecha hasta (ej: 2026-08-31)"),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    buffer = exportar_excel(db, "ganancias", mes=mes, anio=anio)
+    buffer = exportar_excel(db, "ganancias", desde=desde, hasta=hasta)
     return StreamingResponse(
         buffer,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -59,12 +64,12 @@ def ganancias_excel(
 
 @router.get("/ganancias/pdf")
 def ganancias_pdf(
-    mes: Optional[int] = Query(None, description="Mes (1-12)"),
-    anio: Optional[int] = Query(None, description="Año (ej: 2026)"),
+    desde: Optional[date] = Query(None, description="Fecha desde (ej: 2026-08-01)"),
+    hasta: Optional[date] = Query(None, description="Fecha hasta (ej: 2026-08-31)"),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    buffer = exportar_pdf(db, "ganancias", mes=mes, anio=anio)
+    buffer = exportar_pdf(db, "ganancias", desde=desde, hasta=hasta)
     return StreamingResponse(
         buffer,
         media_type="application/pdf",
@@ -73,12 +78,12 @@ def ganancias_pdf(
 
 @router.get("/perdidas/excel")
 def perdidas_excel(
-    mes: Optional[int] = Query(None, description="Mes (1-12)"),
-    anio: Optional[int] = Query(None, description="Año (ej: 2026)"),
+    desde: Optional[date] = Query(None, description="Fecha desde (ej: 2026-08-01)"),
+    hasta: Optional[date] = Query(None, description="Fecha hasta (ej: 2026-08-31)"),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    buffer = exportar_excel(db, "perdidas", mes=mes, anio=anio)
+    buffer = exportar_excel(db, "perdidas", desde=desde, hasta=hasta)
     return StreamingResponse(
         buffer,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -87,12 +92,12 @@ def perdidas_excel(
 
 @router.get("/perdidas/pdf")
 def perdidas_pdf(
-    mes: Optional[int] = Query(None, description="Mes (1-12)"),
-    anio: Optional[int] = Query(None, description="Año (ej: 2026)"),
+    desde: Optional[date] = Query(None, description="Fecha desde (ej: 2026-08-01)"),
+    hasta: Optional[date] = Query(None, description="Fecha hasta (ej: 2026-08-31)"),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    buffer = exportar_pdf(db, "perdidas", mes=mes, anio=anio)
+    buffer = exportar_pdf(db, "perdidas", desde=desde, hasta=hasta)
     return StreamingResponse(
         buffer,
         media_type="application/pdf",
@@ -101,20 +106,18 @@ def perdidas_pdf(
 
 @router.get("/cobranza")
 def reporte_cobranza(
-    mes: Optional[int] = Query(None, description="Mes (1-12)"),
-    anio: Optional[int] = Query(None, description="Año (ej: 2026)"),
+    desde: Optional[date] = Query(None, description="Fecha desde (ej: 2026-08-01)"),
+    hasta: Optional[date] = Query(None, description="Fecha hasta (ej: 2026-08-31)"),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """Reporte de cobranza: cuotas por vencer, vencidas y pagadas"""
-    return get_reporte_cobranza(db, mes=mes, anio=anio)
+    return get_reporte_cobranza(db, desde=desde, hasta=hasta)
 
 @router.get("/cartera")
 def reporte_cartera(
-    mes: Optional[int] = Query(None, description="Mes (1-12)"),
-    anio: Optional[int] = Query(None, description="Año (ej: 2026)"),
+    desde: Optional[date] = Query(None, description="Fecha desde (ej: 2026-08-01)"),
+    hasta: Optional[date] = Query(None, description="Fecha hasta (ej: 2026-08-31)"),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """Reporte de cartera: préstamos activos, renovados y perdidos"""
-    return get_reporte_cartera(db, mes=mes, anio=anio)
+    return get_reporte_cartera(db, desde=desde, hasta=hasta)

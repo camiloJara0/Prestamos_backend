@@ -1,65 +1,69 @@
-# Servicio de reportes : genera datos de ganancias y perdidas
-# y exporta en formato Excel y PDF
-# Soporta filtros por mes, anio o ambos
-
 from sqlalchemy.orm import Session
 from sqlalchemy import extract
 from typing import Optional
-from app.models.models import MovimientoCapital, Prestamo, PrestamoPerdido, Pago, Cliente, PrestamoCuota
+from app.models.models import MovimientoCapital, Prestamo, PrestamoPerdido, Pago, PrestamoCuota, Cliente
 from datetime import date, timedelta
+from io import BytesIO
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
+from reportlab.lib.pagesizes import letter
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
 
-def _filtrar_movimientos(query, mes, anio):
-    if mes:
-        query = query.filter(extract('month', MovimientoCapital.fecha) == mes)
-    if anio:
-        query = query.filter(extract('year', MovimientoCapital.fecha) == anio)
+def _filtrar_movimientos(query, desde, hasta):
+    if desde:
+        query = query.filter(MovimientoCapital.fecha >= desde)
+    if hasta:
+        query = query.filter(MovimientoCapital.fecha <= hasta)
     return query
 
-def _filtrar_pagos(query, mes, anio):
-    if mes:
-        query = query.filter(extract('month', Pago.fecha_pago) == mes)
-    if anio:
-        query = query.filter(extract('year', Pago.fecha_pago) == anio)
+def _filtrar_pagos(query, desde, hasta):
+    if desde:
+        query = query.filter(Pago.fecha_pago >= desde)
+    if hasta:
+        query = query.filter(Pago.fecha_pago <= hasta)
     return query
 
-def _filtrar_perdidos(query, mes, anio):
-    if mes:
-        query = query.filter(extract('month', PrestamoPerdido.fecha) == mes)
-    if anio:
-        query = query.filter(extract('year', PrestamoPerdido.fecha) == anio)
+def _filtrar_perdidos(query, desde, hasta):
+    if desde:
+        query = query.filter(PrestamoPerdido.fecha >= desde)
+    if hasta:
+        query = query.filter(PrestamoPerdido.fecha <= hasta)
     return query
 
-def _label_periodo(mes, anio):
-    meses = {1:"Enero",2:"Febrero",3:"Marzo",4:"Abril",5:"Mayo",6:"Junio",
-             7:"Julio",8:"Agosto",9:"Septiembre",10:"Octubre",11:"Noviembre",12:"Diciembre"}
-    if mes and anio:
-        return f"{meses[mes]} {anio}"
-    elif mes:
-        return meses[mes]
-    elif anio:
-        return str(anio)
+def _label_periodo(desde, hasta):
+    if desde and hasta:
+        return f"{desde} a {hasta}"
+    elif desde:
+        return f"Desde {desde}"
+    elif hasta:
+        return f"Hasta {hasta}"
     return "Todos los periodos"
 
-def get_reporte_ganancias(db: Session, mes: Optional[int] = None, anio: Optional[int] = None):
+def get_reporte_ganancias(db: Session, desde: Optional[date] = None, hasta: Optional[date] = None):
     inversiones = _filtrar_movimientos(
-        db.query(MovimientoCapital).filter(MovimientoCapital.tipo_movimiento == "inversion"), mes, anio).all()
+        db.query(MovimientoCapital).filter(MovimientoCapital.tipo_movimiento == "inversion"), desde, hasta).all()
     total_invertido = sum(m.valor for m in inversiones)
 
     prestamos = _filtrar_movimientos(
-        db.query(MovimientoCapital).filter(MovimientoCapital.tipo_movimiento == "prestamo_otorgado"), mes, anio).all()
+        db.query(MovimientoCapital).filter(MovimientoCapital.tipo_movimiento == "prestamo_otorgado"), desde, hasta).all()
     total_prestado = sum(m.valor for m in prestamos)
 
     pagos = _filtrar_movimientos(
-        db.query(MovimientoCapital).filter(MovimientoCapital.tipo_movimiento == "pago_recibido"), mes, anio).all()
+        db.query(MovimientoCapital).filter(MovimientoCapital.tipo_movimiento == "pago_recibido"), desde, hasta).all()
     total_pagos_recibidos = sum(m.valor for m in pagos)
 
-    pagos_detalle = _filtrar_pagos(db.query(Pago), mes, anio).all()
+    pagos_detalle = _filtrar_pagos(db.query(Pago), desde, hasta).all()
     total_intereses = sum(p.interes_pagado for p in pagos_detalle)
 
     ganancia_neta = round(total_pagos_recibidos - total_prestado + total_invertido, 2)
 
     return {
-        "periodo": _label_periodo(mes, anio),
+        "periodo": _label_periodo(desde, hasta),
         "total_invertido": total_invertido,
         "total_prestado": total_prestado,
         "total_pagos_recibidos": total_pagos_recibidos,
@@ -67,12 +71,12 @@ def get_reporte_ganancias(db: Session, mes: Optional[int] = None, anio: Optional
         "ganancia_neta": ganancia_neta
     }
 
-def get_reporte_perdidas(db: Session, mes: Optional[int] = None, anio: Optional[int] = None):
+def get_reporte_perdidas(db: Session, desde: Optional[date] = None, hasta: Optional[date] = None):
     perdidas = _filtrar_movimientos(
-        db.query(MovimientoCapital).filter(MovimientoCapital.tipo_movimiento == "perdida"), mes, anio).all()
+        db.query(MovimientoCapital).filter(MovimientoCapital.tipo_movimiento == "perdida"), desde, hasta).all()
     total_perdidas = sum(m.valor for m in perdidas)
 
-    prestamos_perdidos = _filtrar_perdidos(db.query(PrestamoPerdido), mes, anio).all()
+    prestamos_perdidos = _filtrar_perdidos(db.query(PrestamoPerdido), desde, hasta).all()
     detalle = [
         {
             "prestamo_id": p.prestamo_id,
@@ -84,19 +88,139 @@ def get_reporte_perdidas(db: Session, mes: Optional[int] = None, anio: Optional[
     ]
 
     return {
-        "periodo": _label_periodo(mes, anio),
+        "periodo": _label_periodo(desde, hasta),
         "total_perdidas": total_perdidas,
         "cantidad_prestamos_perdidos": len(prestamos_perdidos),
         "detalle": detalle
     }
 
-def exportar_excel(db: Session, tipo: str, mes: Optional[int] = None, anio: Optional[int] = None):
-    import openpyxl
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    from openpyxl.utils import get_column_letter
-    from io import BytesIO
-    from datetime import datetime
+def get_reporte_cobranza(db: Session, desde: Optional[date] = None, hasta: Optional[date] = None):
+    """Genera reporte de cobranza con cuotas por vencer, vencidas y pagadas"""
+    
+    today = date.today()
+    
+    # Cuotas por vencer (próximos 7 días, no vencidas aún)
+    fecha_inicio_por_vencer = today
+    fecha_fin_por_vencer = today + timedelta(days=7)
+    
+    cuotas_por_vencer = db.query(PrestamoCuota).join(Prestamo).join(Cliente).filter(
+        PrestamoCuota.estado.in_(["pendiente", "parcial"]),
+        PrestamoCuota.fecha_vencimiento >= fecha_inicio_por_vencer,
+        PrestamoCuota.fecha_vencimiento <= fecha_fin_por_vencer
+    ).all()
+    
+    # Cuotas vencidas (sin pagar, vencidas hace más de 0 días)
+    cuotas_vencidas = db.query(PrestamoCuota).join(Prestamo).join(Cliente).filter(
+        PrestamoCuota.estado.in_(["vencido", "parcial"]),
+        PrestamoCuota.fecha_vencimiento < today
+    ).all()
+    
+    # Cuotas pagadas
+    cuotas_pagadas = db.query(PrestamoCuota).join(Prestamo).join(Cliente).filter(
+        PrestamoCuota.estado == "pagado"
+    ).all()
+    
+    # Aplicar filtros de fecha
+    if desde:
+        cuotas_por_vencer = [c for c in cuotas_por_vencer if c.fecha_vencimiento >= desde]
+        cuotas_vencidas = [c for c in cuotas_vencidas if c.fecha_vencimiento >= desde]
+        cuotas_pagadas = [c for c in cuotas_pagadas if c.fecha_vencimiento >= desde]
+    
+    if hasta:
+        cuotas_por_vencer = [c for c in cuotas_por_vencer if c.fecha_vencimiento <= hasta]
+        cuotas_vencidas = [c for c in cuotas_vencidas if c.fecha_vencimiento <= hasta]
+        cuotas_pagadas = [c for c in cuotas_pagadas if c.fecha_vencimiento <= hasta]
+    
+    return {
+        "periodo": _label_periodo(desde, hasta),
+        "total_cuotas_por_vencer": len(cuotas_por_vencer),
+        "monto_por_vencer": sum(c.valor_cuota for c in cuotas_por_vencer),
+        "total_cuotas_vencidas": len(cuotas_vencidas),
+        "monto_vencido": sum(c.valor_cuota for c in cuotas_vencidas),
+        "total_cuotas_pagadas": len(cuotas_pagadas),
+        "monto_pagado": sum(c.valor_cuota for c in cuotas_pagadas),
+        "cuotas_por_vencer": [
+            {
+                "cuota_id": c.id,
+                "prestamo_id": c.prestamo_id,
+                "cliente_nombre": c.prestamo.cliente.nombre,
+                "numero_cuota": c.numero_cuota,
+                "fecha_vencimiento": str(c.fecha_vencimiento),
+                "valor_cuota": c.valor_cuota,
+                "estado": c.estado,
+                "dias_atraso": 0
+            } for c in cuotas_por_vencer
+        ],
+        "cuotas_vencidas": [
+            {
+                "cuota_id": c.id,
+                "prestamo_id": c.prestamo_id,
+                "cliente_nombre": c.prestamo.cliente.nombre,
+                "numero_cuota": c.numero_cuota,
+                "fecha_vencimiento": str(c.fecha_vencimiento),
+                "valor_cuota": c.valor_cuota,
+                "estado": c.estado,
+                "dias_atraso": (today - c.fecha_vencimiento).days
+            } for c in cuotas_vencidas
+        ],
+        "cuotas_pagadas": [
+            {
+                "cuota_id": c.id,
+                "prestamo_id": c.prestamo_id,
+                "cliente_nombre": c.prestamo.cliente.nombre,
+                "numero_cuota": c.numero_cuota,
+                "fecha_vencimiento": str(c.fecha_vencimiento),
+                "valor_cuota": c.valor_cuota,
+                "estado": c.estado,
+                "dias_atraso": 0
+            } for c in cuotas_pagadas
+        ]
+    }
 
+def get_reporte_cartera(db: Session, desde: Optional[date] = None, hasta: Optional[date] = None):
+    """Genera reporte de cartera con distribución de préstamos por estado"""
+    
+    # Préstamos activos
+    prestamos_activos = db.query(Prestamo).filter(Prestamo.estado == "activo").all()
+    
+    # Préstamos renovados
+    prestamos_renovados = db.query(Prestamo).filter(Prestamo.estado == "renovado").all()
+    
+    # Préstamos perdidos
+    prestamos_perdidos = db.query(Prestamo).filter(Prestamo.estado == "perdido").all()
+    
+    # Aplicar filtros de fecha
+    if desde:
+        prestamos_activos = [p for p in prestamos_activos if p.fecha_prestamo >= desde]
+        prestamos_renovados = [p for p in prestamos_renovados if p.fecha_prestamo >= desde]
+        prestamos_perdidos = [p for p in prestamos_perdidos if p.fecha_prestamo >= desde]
+    
+    if hasta:
+        prestamos_activos = [p for p in prestamos_activos if p.fecha_prestamo <= hasta]
+        prestamos_renovados = [p for p in prestamos_renovados if p.fecha_prestamo <= hasta]
+        prestamos_perdidos = [p for p in prestamos_perdidos if p.fecha_prestamo <= hasta]
+    
+    # Distribución por tipo de préstamo
+    distribucion = {}
+    for p in prestamos_activos + prestamos_renovados + prestamos_perdidos:
+        tipo = p.tipo_prestamo.nombre if p.tipo_prestamo else "Desconocido"
+        if tipo not in distribucion:
+            distribucion[tipo] = {"cantidad": 0, "monto": 0}
+        distribucion[tipo]["cantidad"] += 1
+        distribucion[tipo]["monto"] += p.capital_prestado
+    
+    return {
+        "periodo": _label_periodo(desde, hasta),
+        "total_activos": len(prestamos_activos),
+        "monto_activos": sum(p.capital_prestado for p in prestamos_activos),
+        "total_renovados": len(prestamos_renovados),
+        "monto_renovados": sum(p.capital_prestado for p in prestamos_renovados),
+        "total_perdidos": len(prestamos_perdidos),
+        "monto_perdidos": sum(p.capital_prestado for p in prestamos_perdidos),
+        "distribucion_por_tipo": distribucion
+    }
+
+def exportar_excel(db: Session, tipo: str, desde: Optional[date] = None, hasta: Optional[date] = None):
     MORADO_OSCURO = "5B2D8E"
     MORADO_MEDIO = "7B3FC4"
     MORADO_CLARO = "F5F0FF"
@@ -141,14 +265,14 @@ def exportar_excel(db: Session, tipo: str, mes: Optional[int] = None, anio: Opti
         cell.number_format = '$#,##0.00'
         cell.border = borde_fino
 
-    wb = openpyxl.Workbook()
+    wb = Workbook()
     ws = wb.active
-    fecha_hoy = datetime.now().strftime("%d/%m/%Y %H:%M")
-    periodo = _label_periodo(mes, anio)
+    fecha_hoy = date.today().strftime("%d/%m/%Y %H:%M")
+    periodo = _label_periodo(desde, hasta)
 
     if tipo == "ganancias":
         ws.title = "Reporte de Ganancias"
-        datos = get_reporte_ganancias(db, mes=mes, anio=anio)
+        datos = get_reporte_ganancias(db, desde=desde, hasta=hasta)
 
         ws.column_dimensions['A'].width = 35
         ws.column_dimensions['B'].width = 25
@@ -200,7 +324,7 @@ def exportar_excel(db: Session, tipo: str, mes: Optional[int] = None, anio: Opti
 
     else:
         ws.title = "Reporte de Pérdidas"
-        datos = get_reporte_perdidas(db, mes=mes, anio=anio)
+        datos = get_reporte_perdidas(db, desde=desde, hasta=hasta)
 
         ws.column_dimensions['A'].width = 18
         ws.column_dimensions['B'].width = 18
@@ -268,16 +392,7 @@ def exportar_excel(db: Session, tipo: str, mes: Optional[int] = None, anio: Opti
     buffer.seek(0)
     return buffer
 
-def exportar_pdf(db: Session, tipo: str, mes: Optional[int] = None, anio: Optional[int] = None):
-    from reportlab.lib.pagesizes import letter
-    from reportlab.lib import colors
-    from reportlab.lib.units import inch
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
-    from io import BytesIO
-    from datetime import datetime
-
+def exportar_pdf(db: Session, tipo: str, desde: Optional[date] = None, hasta: Optional[date] = None):
     MORADO_OSCURO = colors.HexColor("#5B2D8E")
     MORADO_MEDIO = colors.HexColor("#7B3FC4")
     MORADO_CLARO = colors.HexColor("#F5F0FF")
@@ -299,8 +414,8 @@ def exportar_pdf(db: Session, tipo: str, mes: Optional[int] = None, anio: Option
     )
 
     styles = getSampleStyleSheet()
-    fecha_hoy = datetime.now().strftime("%d/%m/%Y %H:%M")
-    periodo = _label_periodo(mes, anio)
+    fecha_hoy = date.today().strftime("%d/%m/%Y %H:%M")
+    periodo = _label_periodo(desde, hasta)
 
     estilo_titulo = ParagraphStyle(
         'Titulo',
@@ -343,7 +458,7 @@ def exportar_pdf(db: Session, tipo: str, mes: Optional[int] = None, anio: Option
     story.append(Spacer(1, 20))
 
     if tipo == "ganancias":
-        datos = get_reporte_ganancias(db, mes=mes, anio=anio)
+        datos = get_reporte_ganancias(db, desde=desde, hasta=hasta)
 
         story.append(Paragraph("Resumen Financiero", estilo_seccion))
         story.append(HRFlowable(width="100%", thickness=2, color=MORADO_OSCURO, spaceAfter=10))
@@ -396,7 +511,7 @@ def exportar_pdf(db: Session, tipo: str, mes: Optional[int] = None, anio: Option
         story.append(tabla_neta)
 
     else:
-        datos = get_reporte_perdidas(db, mes=mes, anio=anio)
+        datos = get_reporte_perdidas(db, desde=desde, hasta=hasta)
 
         tabla_resumen = Table([
             [Paragraph("<b>Total Perdidas</b>", ParagraphStyle('tp', fontName='Helvetica-Bold', fontSize=12, textColor=BLANCO)),
@@ -458,114 +573,3 @@ def exportar_pdf(db: Session, tipo: str, mes: Optional[int] = None, anio: Option
     doc.build(story)
     buffer.seek(0)
     return buffer
-
-def get_reporte_cobranza(db: Session, mes: Optional[int] = None, anio: Optional[int] = None):
-    """Genera reporte de cobranza con cuotas por vencer, vencidas y pagadas"""
-    
-    today = date.today()
-    
-    # Cuotas por vencer (próximos 7 días, no vencidas aún)
-    fecha_inicio_por_vencer = today
-    fecha_fin_por_vencer = today + timedelta(days=7)
-    
-    cuotas_por_vencer = db.query(PrestamoCuota).join(Prestamo).join(Cliente).filter(
-        PrestamoCuota.estado.in_(["pendiente", "parcial"]),
-        PrestamoCuota.fecha_vencimiento >= fecha_inicio_por_vencer,
-        PrestamoCuota.fecha_vencimiento <= fecha_fin_por_vencer
-    ).all()
-    
-    # Cuotas vencidas (sin pagar, vencidas hace más de 0 días)
-    cuotas_vencidas = db.query(PrestamoCuota).join(Prestamo).join(Cliente).filter(
-        PrestamoCuota.estado.in_(["vencido", "parcial"]),
-        PrestamoCuota.fecha_vencimiento < today
-    ).all()
-    
-    # Cuotas pagadas
-    cuotas_pagadas = db.query(PrestamoCuota).join(Prestamo).join(Cliente).filter(
-        PrestamoCuota.estado == "pagado"
-    ).all()
-    
-    # Aplicar filtros de fecha si se proporcionan
-    if mes or anio:
-        cuotas_por_vencer = [c for c in cuotas_por_vencer if (mes is None or c.fecha_vencimiento.month == mes) and (anio is None or c.fecha_vencimiento.year == anio)]
-        cuotas_vencidas = [c for c in cuotas_vencidas if (mes is None or c.fecha_vencimiento.month == mes) and (anio is None or c.fecha_vencimiento.year == anio)]
-        cuotas_pagadas = [c for c in cuotas_pagadas if (mes is None or c.fecha_vencimiento.month == mes) and (anio is None or c.fecha_vencimiento.year == anio)]
-    
-    return {
-        "periodo": _label_periodo(mes, anio),
-        "total_cuotas_por_vencer": len(cuotas_por_vencer),
-        "monto_por_vencer": sum(c.valor_cuota for c in cuotas_por_vencer),
-        "total_cuotas_vencidas": len(cuotas_vencidas),
-        "monto_vencido": sum(c.valor_cuota for c in cuotas_vencidas),
-        "total_cuotas_pagadas": len(cuotas_pagadas),
-        "monto_pagado": sum(c.valor_cuota for c in cuotas_pagadas),
-        "cuotas_por_vencer": [
-            {
-                "cuota_id": c.id,
-                "prestamo_id": c.prestamo_id,
-                "cliente_nombre": c.prestamo.cliente.nombre,
-                "numero_cuota": c.numero_cuota,
-                "fecha_vencimiento": str(c.fecha_vencimiento),
-                "valor_cuota": c.valor_cuota,
-                "estado": c.estado,
-                "dias_atraso": 0
-            } for c in cuotas_por_vencer
-        ],
-        "cuotas_vencidas": [
-            {
-                "cuota_id": c.id,
-                "prestamo_id": c.prestamo_id,
-                "cliente_nombre": c.prestamo.cliente.nombre,
-                "numero_cuota": c.numero_cuota,
-                "fecha_vencimiento": str(c.fecha_vencimiento),
-                "valor_cuota": c.valor_cuota,
-                "estado": c.estado,
-                "dias_atraso": (today - c.fecha_vencimiento).days
-            } for c in cuotas_vencidas
-        ],
-        "cuotas_pagadas": [
-            {
-                "cuota_id": c.id,
-                "prestamo_id": c.prestamo_id,
-                "cliente_nombre": c.prestamo.cliente.nombre,
-                "numero_cuota": c.numero_cuota,
-                "fecha_vencimiento": str(c.fecha_vencimiento),
-                "valor_cuota": c.valor_cuota,
-                "estado": c.estado,
-                "dias_atraso": 0
-            } for c in cuotas_pagadas
-        ]
-    }
-
-
-def get_reporte_cartera(db: Session, mes: Optional[int] = None, anio: Optional[int] = None):
-    """Genera reporte de cartera con distribución de préstamos por estado"""
-    
-    # Préstamos activos
-    prestamos_activos = db.query(Prestamo).filter(Prestamo.estado == "activo").all()
-    
-    # Préstamos renovados
-    prestamos_renovados = db.query(Prestamo).filter(Prestamo.estado == "renovado").all()
-    
-    # Préstamos perdidos
-    prestamos_perdidos = db.query(Prestamo).filter(Prestamo.estado == "perdido").all()
-    
-    # Distribución por tipo de préstamo
-    distribucion = {}
-    for p in prestamos_activos + prestamos_renovados + prestamos_perdidos:
-        tipo = p.tipo_prestamo.nombre if p.tipo_prestamo else "Desconocido"
-        if tipo not in distribucion:
-            distribucion[tipo] = {"cantidad": 0, "monto": 0}
-        distribucion[tipo]["cantidad"] += 1
-        distribucion[tipo]["monto"] += p.capital_prestado
-    
-    return {
-        "periodo": _label_periodo(mes, anio),
-        "total_activos": len(prestamos_activos),
-        "monto_activos": sum(p.capital_prestado for p in prestamos_activos),
-        "total_renovados": len(prestamos_renovados),
-        "monto_renovados": sum(p.capital_prestado for p in prestamos_renovados),
-        "total_perdidos": len(prestamos_perdidos),
-        "monto_perdidos": sum(p.capital_prestado for p in prestamos_perdidos),
-        "distribucion_por_tipo": distribucion
-    }
