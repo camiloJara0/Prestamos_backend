@@ -108,16 +108,18 @@ def perdidas_pdf(
 def reporte_cobranza(
     desde: Optional[date] = Query(None, description="Fecha desde (ej: 2026-08-01)"),
     hasta: Optional[date] = Query(None, description="Fecha hasta (ej: 2026-08-31)"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
-    """Reporte de cobranza: información pública agregada (sin autenticación)"""
+    """Reporte de cobranza: información financiera de la empresa"""
     return get_reporte_cobranza(db, desde=desde, hasta=hasta)
 
 @router.get("/cartera")
 def reporte_cartera(
     desde: Optional[date] = Query(None, description="Fecha desde (ej: 2026-08-01)"),
     hasta: Optional[date] = Query(None, description="Fecha hasta (ej: 2026-08-31)"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
-    """Reporte de cartera: información pública agregada (sin autenticación)"""
+    """Reporte de cartera: información financiera de la empresa"""
     return get_reporte_cartera(db, desde=desde, hasta=hasta)
