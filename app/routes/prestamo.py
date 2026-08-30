@@ -7,12 +7,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from datetime import date
 from typing import Optional
-from app import services
 from app.db.database import SessionLocal
 from app.schemas.prestamo import PrestamoCreate, PrestamoOut, PrestamoDetalleOut, RenovacionCreate, MarcarPerdidoRequest
-from app.services.prestamo import crear_prestamo, get_prestamos, obtener_prestamo, renovar_prestamo, marcar_prestamo_perdido
+from app.services.prestamo import crear_prestamo, get_prestamos, obtener_prestamo, renovar_prestamo, marcar_prestamo_perdido, ajustar_capital_prestamo
 from app.dependencies.auth import get_current_user
-from dateutil.relativedelta import relativedelta
 from app.services import prestamo as services
 
 router = APIRouter(prefix="/prestamos", tags=["Prestamos"])
@@ -81,7 +79,7 @@ def ajustar_capital(
     if current_user["rol"] != "admin":
         raise HTTPException(status_code=403, detail="Solo administradores pueden ajustar capital")
     
-    prestamo = services.ajustar_capital_prestamo(db, prestamo_id, nuevo_capital)
+    prestamo = ajustar_capital_prestamo(db, prestamo_id, nuevo_capital, usuario_id=current_user["sub"])
     return {
         "mensaje": "Capital ajustado exitosamente",
         "prestamo_id": prestamo.id,

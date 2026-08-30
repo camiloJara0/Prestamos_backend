@@ -18,7 +18,7 @@ def get_db():
 
 @router.post("/", response_model=PagoOut)
 def crear_pago(pago: PagoCreate, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    return registrar_pago(db, pago)
+    return registrar_pago(db, pago, usuario_id=current_user["sub"])
 
 @router.get("/", response_model=list[PagoOut])
 def listar_pagos(skip: int = 0, limit: int = 10, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):

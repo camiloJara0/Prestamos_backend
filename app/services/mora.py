@@ -47,7 +47,6 @@ def delete_mora(db: Session, mora_id: int):
         db.commit()
     return db_mora
 
-# Calcular mora usando configuración del sistema
 def calcular_mora(db: Session, cuota: PrestamoCuota, pago: Pago = None) -> Mora | None:
     """
     Calcula mora para una cuota usando parámetros de ConfiguracionSistema.
@@ -108,8 +107,25 @@ def calcular_mora(db: Session, cuota: PrestamoCuota, pago: Pago = None) -> Mora 
         cuota.estado = "vencido"
         db.add(mora)
         db.commit()
+        
+        # Registrar en auditoria
+        from app.services.auditoria import registrar_auditoria
+        registrar_auditoria(
+            db,
+            usuario_id=1,  # Sistema
+            tabla_afectada="moras",
+            tipo_operacion="CREATE",
+            registro_id=mora.id,
+            valores_nuevas={
+                "cuota_id": mora.cuota_id,
+                "prestamo_id": mora.prestamo_id,
+                "valor": mora.valor,
+                "estado": mora.estado
+            },
+            descripcion=f"Mora generada automáticamente para cuota #{mora.cuota_id}"
+        )
+        
         return mora
-
 
 def procesar_moras(db: Session, tasa_diaria: float = None):
     """

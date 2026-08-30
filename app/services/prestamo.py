@@ -103,6 +103,26 @@ def crear_prestamo(db: Session, prestamo: PrestamoCreate, usuario_id: int):
     
     db.commit()
     db.refresh(db_prestamo)
+    
+    # Registrar en auditoria
+    from app.services.auditoria import registrar_auditoria
+    registrar_auditoria(
+        db,
+        usuario_id=usuario_id,
+        tabla_afectada="prestamos",
+        tipo_operacion="CREATE",
+        registro_id=db_prestamo.id,
+        valores_nuevos={
+            "cliente_id": db_prestamo.cliente_id,
+            "capital_prestado": db_prestamo.capital_prestado,
+            "porcentaje_interes": db_prestamo.porcentaje_interes,
+            "numero_cuotas": db_prestamo.numero_cuotas,
+            "monto_total": db_prestamo.monto_total,
+            "estado": db_prestamo.estado
+        },
+        descripcion=f"Préstamo creado para cliente {cliente.nombre}"
+    )
+    
     return db_prestamo
 
 def get_prestamos(db: Session, skip: int = 0, limit: int = 10, estado: str = "activo",
@@ -263,7 +283,7 @@ def marcar_prestamo_perdido(db: Session, prestamo_id: int, datos):
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error al marcar prestamo como perdido: {str(e)}")
 
-def ajustar_capital_prestamo(db: Session, prestamo_id: int, nuevo_capital: float):
+def ajustar_capital_prestamo(db: Session, prestamo_id: int, nuevo_capital: float, usuario_id: int):
     """
     Ajusta el capital de un préstamo y recalcula todas las cuotas.
     Solo puede ser usado por administradores para correcciones.
@@ -326,4 +346,24 @@ def ajustar_capital_prestamo(db: Session, prestamo_id: int, nuevo_capital: float
     
     db.commit()
     db.refresh(db_prestamo)
+    
+    # Registrar en auditoria
+    from app.services.auditoria import registrar_auditoria
+    registrar_auditoria(
+        db,
+        usuario_id=usuario_id,
+        tabla_afectada="prestamos",
+        tipo_operacion="UPDATE",
+        registro_id=prestamo_id,
+        valores_anteriores={
+            "capital_prestado": capital_anterior
+        },
+        valores_nuevos={
+            "capital_prestado": db_prestamo.capital_prestado,
+            "monto_total": db_prestamo.monto_total,
+            "valor_cuota": db_prestamo.valor_cuota
+        },
+        descripcion=f"Capital ajustado: ${capital_anterior:,.2f} → ${nuevo_capital:,.2f}"
+    )
+    
     return db_prestamo

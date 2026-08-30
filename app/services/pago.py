@@ -47,7 +47,7 @@ def _validar_pago(db: Session, pago: PagoCreate):
     return cuota, prestamo
 
 
-def registrar_pago(db: Session, pago: PagoCreate):
+def registrar_pago(db: Session, pago: PagoCreate, usuario_id: int):
     cuota, prestamo = _validar_pago(db, pago)
 
     # Registra el pago
@@ -68,7 +68,7 @@ def registrar_pago(db: Session, pago: PagoCreate):
     # Actualiza el estado de la cuota
     if pago.valor_pagado >= cuota.valor_cuota:
         cuota.estado = "pagado"
-    elif pago.valor_pagado > 0 and pago.valor_pagado < cuota.valor_cuota :
+    elif pago.valor_pagado > 0 and pago.valor_pagado < cuota.valor_cuota:
         cuota.estado = "parcial"
     else:
         cuota.estado = "pendiente"
@@ -88,6 +88,25 @@ def registrar_pago(db: Session, pago: PagoCreate):
 
     db.commit()
     db.refresh(db_pago)
+
+    # Registrar en auditoria
+    from app.services.auditoria import registrar_auditoria
+    registrar_auditoria(
+        db,
+        usuario_id=usuario_id,
+        tabla_afectada="pagos",
+        tipo_operacion="CREATE",
+        registro_id=db_pago.id,
+        valores_nuevos={
+            "cuota_id": db_pago.cuota_id,
+            "monto_pagado": db_pago.valor_pagado,
+            "capital_pagado": db_pago.capital_pagado,
+            "interes_pagado": db_pago.interes_pagado,
+            "mora_pagada": db_pago.mora_pagada,
+            "fecha_pago": str(db_pago.fecha_pago)
+        },
+        descripcion=f"Pago registrado para cuota #{db_pago.cuota_id}"
+    )
 
     return db_pago
 
