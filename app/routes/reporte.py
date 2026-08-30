@@ -5,8 +5,8 @@
 # GET /reportes/ganancias/pdf : exportar ganancias en PDF
 # GET /reportes/perdidas/excel : exportar perdidas en Excel
 # GET /reportes/perdidas/pdf : exportar perdidas en PDF
-# GET /reportes/cobranza : reporte de cobranza en JSON
-# GET /reportes/cartera : reporte de cartera en JSON
+# GET /reportes/cobranza : reporte de cobranza en JSON (PÚBLICO)
+# GET /reportes/cartera : reporte de cartera en JSON (PÚBLICO)
 # Todos los endpoints aceptan filtros opcionales: desde, hasta
 
 from fastapi import APIRouter, Depends, Query
@@ -108,16 +108,16 @@ def perdidas_pdf(
 def reporte_cobranza(
     desde: Optional[date] = Query(None, description="Fecha desde (ej: 2026-08-01)"),
     hasta: Optional[date] = Query(None, description="Fecha hasta (ej: 2026-08-31)"),
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
+    """Reporte de cobranza: información pública agregada (sin autenticación)"""
     return get_reporte_cobranza(db, desde=desde, hasta=hasta)
 
 @router.get("/cartera")
 def reporte_cartera(
     desde: Optional[date] = Query(None, description="Fecha desde (ej: 2026-08-01)"),
     hasta: Optional[date] = Query(None, description="Fecha hasta (ej: 2026-08-31)"),
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
+    """Reporte de cartera: información pública agregada (sin autenticación)"""
     return get_reporte_cartera(db, desde=desde, hasta=hasta)
