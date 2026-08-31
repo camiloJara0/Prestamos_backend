@@ -1,31 +1,38 @@
 ﻿# Seed : crea datos de prueba predeterminados en la base de datos
 # Ejecutar con: python -m app.db.seed
 
-from app.db.database import SessionLocal, init_db
-from app.models.models import Usuario, TipoPrestamo, Cliente, MovimientoCapital, Capital, ConfiguracionSistema
-from app.core.security import hash_password
 from datetime import date
+from app.db.database import SessionLocal, init_db
+from app.models.models import (
+    Usuario, 
+    TipoPrestamo, 
+    Cliente, 
+    MovimientoCapital, 
+    Capital, 
+    ConfiguracionSistema
+)
+from app.core.security import hash_password
 
 def seed():
     init_db()
     db = SessionLocal()
 
     try:
-        # Usuario admin
-        if not db.query(Usuario).filter(Usuario.email == "admin@test.com").first():
+        # 1. Usuario admin principal
+        if not db.query(Usuario).filter(Usuario.email == "admin@admin.com").first():
             usuario = Usuario(
                 nombre="Administrador",
-                email="admin@test.com",
-                hashed_password=hash_password("123456"),
+                email="admin@admin.com",
+                hashed_password=hash_password("admin123"),
                 rol="admin",
                 estado="activo"
             )
             db.add(usuario)
-            print("Usuario admin creado")
+            print("Usuario admin creado (admin@admin.com)")
         else:
             print("- Usuario admin ya existe")
 
-        # Tipos de prestamo
+        # 2. Tipos de préstamo
         tipos = [
             {"nombre": "Préstamo Personal", "descripcion": "Préstamo para uso personal", "interes_mensual": 2.5, "max_cuotas": 12},
             {"nombre": "Préstamo Empresarial", "descripcion": "Préstamo para negocios", "interes_mensual": 2.0, "max_cuotas": 24},
@@ -38,7 +45,7 @@ def seed():
             else:
                 print(f"- Tipo de préstamo '{t['nombre']}' ya existe")
 
-        # Cliente de prueba
+        # 3. Cliente de prueba
         if not db.query(Cliente).filter(Cliente.cedula == "123456789").first():
             cliente = Cliente(
                 nombre="Carlos Rodríguez",
@@ -54,7 +61,7 @@ def seed():
 
         db.commit()
 
-        # Capital inicial
+        # 4. Capital inicial
         capital = db.query(Capital).first()
         if not capital or capital.monto_total == 0:
             capital_inicial = Capital(monto_total=10000000.0)
@@ -71,7 +78,7 @@ def seed():
         else:
             print("- Capital ya existe")
 
-        # Crear configuraciones del sistema
+        # 5. Configuraciones del sistema
         configs = [
             {
                 "clave": "tasa_mora_diaria",
@@ -102,8 +109,8 @@ def seed():
         db.commit()
 
         print("\nSeed completado exitosamente")
-        print("   Email: admin@test.com")
-        print("   Password: 123456")
+        print("  Email: admin@admin.com")
+        print("  Password: admin123")
 
     except Exception as e:
         db.rollback()

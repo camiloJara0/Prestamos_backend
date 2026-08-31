@@ -1,8 +1,8 @@
+from datetime import datetime, timezone
 from sqlalchemy import (
     Boolean, Column, Integer, String, Float, Date, DateTime, ForeignKey, Enum, Text
 )
 from sqlalchemy.orm import relationship
-from datetime import datetime
 from app.models.base import Base
 
 
@@ -76,7 +76,7 @@ class PrestamoCuota(Base):
     numero_cuota = Column(Integer)
     fecha_vencimiento = Column(Date)
     valor_cuota = Column(Float)
-    monto_interes = Column(Float, default=0.0)  # Interés de esta cuota
+    monto_interes = Column(Float, default=0.0)
     capital = Column(Float)
     interes = Column(Float)
     mora = Column(Float)
@@ -86,6 +86,7 @@ class PrestamoCuota(Base):
 
     prestamo = relationship("Prestamo", back_populates="cuotas")
     pagos = relationship("Pago", back_populates="cuota")
+
 
 class TipoPago(Base):
     __tablename__ = "tipos_pago"
@@ -99,13 +100,14 @@ class TipoPago(Base):
 
     pagos = relationship("Pago", back_populates="tipo_pago")
 
+
 class Pago(Base):
     __tablename__ = "pagos"
 
     id = Column(Integer, primary_key=True, index=True)
     prestamo_id = Column(Integer, ForeignKey("prestamos.id"))
     cliente_id = Column(Integer, ForeignKey("clientes.id"))
-    cuota_id = Column(Integer, ForeignKey("prestamo_cuotas.id"))
+    cuota_id = Column(Integer, ForeignKey("prestamo_cuotas.id"), nullable=True)
     tipo_pago_id = Column(Integer, ForeignKey("tipos_pago.id"))
 
     fecha_pago = Column(Date)
@@ -122,16 +124,26 @@ class Pago(Base):
     cuota = relationship("PrestamoCuota", back_populates="pagos")
     tipo_pago = relationship("TipoPago", back_populates="pagos")
 
+
 class MovimientoCapital(Base):
     __tablename__ = "movimientos_capital"
 
     id = Column(Integer, primary_key=True, index=True)
-    tipo_movimiento = Column(Enum("inversion", "retiro", "prestamo_otorgado", "pago_recibido", "perdida", name="tipo_movimiento"))
+    tipo_movimiento = Column(Enum(
+        "inversion",
+        "retiro",
+        "prestamo_otorgado",
+        "pago_recibido",
+        "ajuste_prestamo",
+        "perdida",
+        name="tipo_movimiento"
+    ))
     descripcion = Column(Text)
     valor = Column(Float)
     fecha = Column(Date)
     prestamo_id = Column(Integer, ForeignKey("prestamos.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
 
 class PrestamoRenovacion(Base):
     __tablename__ = "prestamos_renovaciones"
@@ -142,6 +154,7 @@ class PrestamoRenovacion(Base):
     fecha = Column(Date)
     observaciones = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
+
 
 class Mora(Base):
     __tablename__ = "moras"
@@ -154,6 +167,7 @@ class Mora(Base):
     estado = Column(String(50))
     created_at = Column(DateTime, default=datetime.utcnow)
 
+
 class PrestamoPerdido(Base):
     __tablename__ = "prestamos_perdidos"
 
@@ -164,8 +178,6 @@ class PrestamoPerdido(Base):
     motivo = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-# Modelo de Usuario : Es la tabla en la base de datos que guarda los usuarios del sistema. 
-# Tiene email, contraseña (guardada como hash), rol (admin/usuario) y estado. 
 
 class Usuario(Base):
     __tablename__ = "usuarios"
@@ -176,28 +188,43 @@ class Usuario(Base):
     hashed_password = Column(String(255), nullable=False)
     rol = Column(Enum("admin", "usuario", name="rol_usuario"), default="usuario")
     estado = Column(Enum("activo", "inactivo", name="estado_usuario"), default="activo")
+
+    reset_token = Column(String(255), nullable=True)
+    reset_token_expires = Column(DateTime, nullable=True)
+
+    created_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
+    )
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
+        onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
+    )
+
+    tokens = relationship("Token", back_populates="usuario", cascade="all, delete-orphan")
     auditorias = relationship("Auditoria", back_populates="usuario")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    push_subscriptions = relationship(
+        "PushSubscription",
+        back_populates="usuario",
+        cascade="all, delete-orphan",
+    )
 
-    tokens = relationship("Token", back_populates="usuario")
 
-# cuando el usuario haga login guardamos el token en la DB, y cuando haga logout lo marcamos como inválido. 
-# Así aunque el token no haya expirado, si está en la tabla como inválido el servidor lo rechaza.
-
-class Token (Base):
+class Token(Base):
     __tablename__ = "tokens"
 
     id = Column(Integer, primary_key=True, index=True)
     usuario_id = Column(Integer, ForeignKey("usuarios.id"))
     access_token = Column(String(500), nullable=False)
     refresh_token = Column(String(500), nullable=False)
-    activo = Column(Integer, default=1) # 1 = activo - 0 = inactivo
+    activo = Column(Integer, default=1)
     created_at = Column(DateTime, default=datetime.utcnow)
     expires_at = Column(DateTime, nullable=False)
 
     usuario = relationship("Usuario", back_populates="tokens")
 
-# Guarda el total de capital disponible en el negocio
+
 class Capital(Base):
     __tablename__ = "capital"
 
@@ -205,14 +232,15 @@ class Capital(Base):
     monto_total = Column(Float, default=0.0)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+
 class ConfiguracionSistema(Base):
     __tablename__ = "configuracion_sistema"
 
     id = Column(Integer, primary_key=True, index=True)
-    clave = Column(String(100), unique=True, nullable=False)  # ej: "tasa_mora_diaria", "interes_minimo"
-    valor = Column(String(255), nullable=False)  # El valor como string
-    descripcion = Column(Text)  # Descripción de qué es
-    tipo_valor = Column(String(50), default="float")  # float, int, string, boolean
+    clave = Column(String(100), unique=True, nullable=False)
+    valor = Column(String(255), nullable=False)
+    descripcion = Column(Text)
+    tipo_valor = Column(String(50), default="float")
     activo = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -220,21 +248,53 @@ class ConfiguracionSistema(Base):
     def __repr__(self):
         return f"<ConfiguracionSistema(clave={self.clave}, valor={self.valor})>"
 
+
 class Auditoria(Base):
     __tablename__ = "auditoria"
 
     id = Column(Integer, primary_key=True, index=True)
     usuario_id = Column(Integer, ForeignKey("usuarios.id"))
-    tabla_afectada = Column(String(100), nullable=False)  # ej: "prestamos", "pagos"
-    tipo_operacion = Column(String(50), nullable=False)  # CREATE, UPDATE, DELETE
-    registro_id = Column(Integer)  # ID del registro afectado
-    valores_anteriores = Column(Text)  # JSON con valores antes del cambio
-    valores_nuevos = Column(Text)  # JSON con valores después del cambio
+    tabla_afectada = Column(String(100), nullable=False)
+    tipo_operacion = Column(String(50), nullable=False)
+    registro_id = Column(Integer)
+    valores_anteriores = Column(Text)
+    valores_nuevos = Column(Text)
     descripcion = Column(Text)
     ip_address = Column(String(50))
     fecha = Column(DateTime, default=datetime.utcnow)
-    
+
     usuario = relationship("Usuario", back_populates="auditorias")
 
     def __repr__(self):
         return f"<Auditoria(tabla={self.tabla_afectada}, operacion={self.tipo_operacion}, fecha={self.fecha})>"
+
+
+class IdempotencyKey(Base):
+    __tablename__ = "idempotency_keys"
+
+    key = Column(String(255), primary_key=True, index=True)
+    response = Column(Text, nullable=False)
+    status_code = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PushSubscription(Base):
+    __tablename__ = "push_subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(
+        Integer, ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False
+    )
+    endpoint = Column(Text, nullable=False, unique=True)
+    p256dh = Column(String(255), nullable=False)
+    auth = Column(String(255), nullable=False)
+    created_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
+    )
+
+    usuario = relationship("Usuario", back_populates="push_subscriptions")
+
+# --- Al final del archivo app/models/models.py ---
+from sqlalchemy.orm import configure_mappers
+configure_mappers()

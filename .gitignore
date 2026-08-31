@@ -7,6 +7,9 @@ __pycache__/
 *.pyo
 .env
 
+# Archivos Criptográficos / Keys
+*.pem
+
 # Virtual environment
 venv/
 env/

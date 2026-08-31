@@ -4,3 +4,4 @@ from app.models.models import (
     TipoPago, Pago, MovimientoCapital, PrestamoRenovacion,
     Mora, PrestamoPerdido, Usuario, Token, Capital, ConfiguracionSistema, Auditoria
 )
+from app.models.models import *

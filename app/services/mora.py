@@ -21,8 +21,21 @@ def obtener_parametro_config(db: Session, clave: str, default_value: str = "0.0"
     return float(default_value)
 
 
-def get_moras(db: Session, skip: int = 0, limit: int = 10):
-    return db.query(Mora).filter(Mora.estado == "generada").order_by(Mora.fecha.desc()).offset(skip).limit(limit).all()
+def get_moras(db: Session, page: int = 1, limit: int = 10):
+    """Obtiene las moras en estado generada con paginación B11."""
+    query = db.query(Mora).filter(Mora.estado == "generada")
+    total = query.count()
+    offset = (page - 1) * limit
+    items = query.order_by(Mora.fecha.desc()).offset(offset).limit(limit).all()
+    pages = (total + limit - 1) // limit if total > 0 else 1
+
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "pages": pages,
+        "limit": limit
+    }
 
 def get_moras_prestamo(db: Session, prestamo_id: int):
     return db.query(Mora).filter(Mora.prestamo_id == prestamo_id).order_by(Mora.fecha.desc()).all()
@@ -116,7 +129,7 @@ def calcular_mora(db: Session, cuota: PrestamoCuota, pago: Pago = None) -> Mora 
             tabla_afectada="moras",
             tipo_operacion="CREATE",
             registro_id=mora.id,
-            valores_nuevas={
+            valores_nuevos={
                 "cuota_id": mora.cuota_id,
                 "prestamo_id": mora.prestamo_id,
                 "valor": mora.valor,

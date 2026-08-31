@@ -1,14 +1,16 @@
 # Endpoints de prestamos
 # POST /prestamos : crea un nuevo prestamo con cuotas automaticas
-# GET /prestamos : lista los prestamos con filtros
+# GET /prestamos : lista los prestamos con filtros y paginación
 # GET /prestamos/{id} : detalle completo con cuotas, pagos y cliente
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from datetime import date
 from typing import Optional
+
 from app.db.database import SessionLocal
 from app.schemas.prestamo import PrestamoCreate, PrestamoOut, PrestamoDetalleOut, RenovacionCreate, MarcarPerdidoRequest
+from app.schemas.pagination import PaginatedResponse
 from app.services.prestamo import crear_prestamo, get_prestamos, obtener_prestamo, renovar_prestamo, marcar_prestamo_perdido, ajustar_capital_prestamo
 from app.dependencies.auth import get_current_user
 from app.services import prestamo as services
@@ -26,10 +28,10 @@ def get_db():
 def crear(prestamo: PrestamoCreate, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     return services.crear_prestamo(db, prestamo, current_user["sub"])
 
-@router.get("/", response_model=list[PrestamoOut])
+@router.get("/", response_model=PaginatedResponse[PrestamoOut])
 def listar(
-    skip: int = 0,
-    limit: int = 10,
+    page: int = Query(1, ge=1, description="Número de página"),
+    limit: int = Query(10, ge=1, le=100, description="Elementos por página"),
     estado: Optional[str] = "activo",
     cliente_id: Optional[int] = None,
     fecha_desde: Optional[date] = None,
@@ -40,7 +42,7 @@ def listar(
 ):
     return get_prestamos(
         db,
-        skip=skip,
+        page=page,
         limit=limit,
         estado=estado,
         cliente_id=cliente_id,
@@ -71,11 +73,6 @@ def ajustar_capital(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Ajusta el capital de un préstamo y recalcula todas las cuotas.
-    Solo administradores pueden usar este endpoint.
-    Útil para correcciones si hay errores en el cálculo inicial.
-    """
     if current_user["rol"] != "admin":
         raise HTTPException(status_code=403, detail="Solo administradores pueden ajustar capital")
     

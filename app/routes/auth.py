@@ -1,19 +1,22 @@
-# El endpoint /login recibe email y contraseña, busca el usuario en la BD, verifica la contraseña con bcrypt
-# si todo esta correcto devuelve el token JWT y lo guarda en la base de datos
-# el endpoint /logout invalida el token en la base de datos
-
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import APIRouter, Depends, status, HTTPException
 from sqlalchemy.orm import Session
-from datetime import datetime, timedelta
-from app.db.database import SessionLocal
-from app.models.models import Usuario, Token
-from app.schemas.auth import LoginRequest, TokenResponse, TokenRefreshRequest, TokenRefreshResponse
-from app.core.security import verify_password, create_access_token, create_refresh_token, decode_token, ACCESS_TOKEN_EXPIRE_MINUTES
-from app.dependencies.auth import get_current_user
 
-router = APIRouter()
-bearer_scheme = HTTPBearer()
+from app.db.database import SessionLocal
+from app.schemas.auth import (
+    LoginRequest,
+    ChangePasswordRequest,  # <--- Nuevo esquema importado
+    ForgotPasswordRequest, 
+    ResetPasswordRequest, 
+    TokenResponse, 
+    TokenRefreshRequest,
+    TokenRefreshResponse,
+    MessageResponse
+)
+from app.dependencies.auth import get_current_user
+from app.services import auth as auth_service
+
+router = APIRouter(prefix="/auth", tags=["Autenticación"])
+
 
 def get_db():
     db = SessionLocal()
@@ -22,75 +25,59 @@ def get_db():
     finally:
         db.close()
 
+
 @router.post("/login", response_model=TokenResponse)
-def login(data: LoginRequest, db: Session = Depends(get_db)):
-    usuario = db.query(Usuario).filter(Usuario.email == data.email).first()
-    if not usuario or not verify_password(data.password, usuario.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Email o contraseña incorrectos"
-        )
-    access_token = create_access_token({"sub": usuario.email, "rol": usuario.rol})
-    refresh_token = create_refresh_token({"sub": usuario.email, "rol": usuario.rol})
+def login(req: LoginRequest, db: Session = Depends(get_db)):
+    """Inicia sesión con email y password mediante JSON."""
+    return auth_service.login_usuario(db, req.email, req.password)
 
-    # Guarda el token en la base de datos
-    db_token = Token(
-        usuario_id=usuario.id,
-        access_token=access_token,
-        refresh_token=refresh_token,
-        activo=1,
-        expires_at=datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    )
-    db.add(db_token)
-    db.commit()
-
-    return {"access_token": access_token, "refresh_token": refresh_token}
-
-@router.post("/logout")
-def logout(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme), db: Session = Depends(get_db)):
-    token = credentials.credentials
-    # Busca el token en la DB y lo invalida
-    db_token = db.query(Token).filter(Token.access_token == token, Token.activo == 1).first()
-    if not db_token:
-        raise HTTPException(status_code=401, detail="Token no encontrado o ya invalidado")
-    db_token.activo = 0
-    db.commit()
-    return {"mensaje": "Sesión cerrada correctamente"}
-
-@router.get("/me")
-def perfil(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
-    usuario = db.query(Usuario).filter(Usuario.email == current_user["sub"]).first()
-    if not usuario:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado")
-    return {
-        "id": usuario.id,
-        "nombre": usuario.nombre,
-        "email": usuario.email,
-        "rol": usuario.rol,
-        "estado": usuario.estado
-    }
 
 @router.post("/refresh", response_model=TokenRefreshResponse)
-def refresh(data: TokenRefreshRequest, db: Session = Depends(get_db)):
-    try:
-        payload = decode_token(data.refresh_token)
-        if payload.get("type") != "refresh":
-            raise HTTPException(status_code=401, detail="Token invalido")
-        
-        # Verifica que el refresh token esté activo en la DB
-        db_token = db.query(Token).filter(Token.refresh_token == data.refresh_token, Token.activo == 1).first()
-        if not db_token:
-            raise HTTPException(status_code=401, detail="Refresh token invalidado")
-        
-        nuevo_token = create_access_token({"sub": payload["sub"], "rol": payload["rol"]})
-        
-        # Actualiza el access token en la DB
-        db_token.access_token = nuevo_token
-        db_token.expires_at = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-        db.commit()
-        
-        return {"access_token": nuevo_token}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=401, detail="Refresh token invalido o expirado")
+def refresh_token(req: TokenRefreshRequest, db: Session = Depends(get_db)):
+    """Renueva el token de acceso usando un refresh token válido."""
+    return auth_service.refrescar_token(db, req.refresh_token)
+
+
+@router.post("/logout", response_model=MessageResponse)
+def logout(req: TokenRefreshRequest, db: Session = Depends(get_db)):
+    """Invalida el token activo y cierra sesión."""
+    auth_service.logout_usuario(db, req.refresh_token)
+    return {"message": "Sesión cerrada correctamente."}
+
+
+@router.get("/me")
+def obtener_perfil(current_user: dict = Depends(get_current_user)):
+    """Devuelve los datos del usuario autenticado."""
+    return current_user
+
+
+@router.post("/change-password", response_model=MessageResponse)
+def change_password(
+    req: ChangePasswordRequest, 
+    db: Session = Depends(get_db), 
+    current_user: dict = Depends(get_current_user)
+):
+    """Permite al usuario autenticado cambiar su propia contraseña validando la actual."""
+    # current_user contiene el payload del token ('id' o 'sub')
+    usuario_id = current_user.get("id") or current_user.get("sub")
+    auth_service.cambiar_password(
+        db, 
+        usuario_id=usuario_id, 
+        password_actual=req.password_actual, 
+        password_nuevo=req.password_nuevo
+    )
+    return {"message": "Contraseña cambiada exitosamente."}
+
+
+@router.post("/forgot-password", response_model=MessageResponse)
+def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    """Genera un token de recuperación de contraseña."""
+    mensaje = auth_service.solicitar_reset_password(db, req.email)
+    return {"message": mensaje}
+
+
+@router.post("/reset-password", response_model=MessageResponse)
+def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
+    """Valida el token de recuperación y actualiza la contraseña."""
+    auth_service.resetear_password(db, req.token, req.new_password)
+    return {"message": "Contraseña actualizada exitosamente."}
