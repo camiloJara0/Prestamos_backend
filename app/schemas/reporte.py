@@ -3,6 +3,7 @@ from typing import Optional
 from datetime import date
 
 class ReporteGananciasOut(BaseModel):
+    periodo: str
     total_invertido: float
     total_prestado: float
     total_pagos_recibidos: float
@@ -10,8 +11,9 @@ class ReporteGananciasOut(BaseModel):
     ganancia_neta: float
 
 class ReportePérdidasOut(BaseModel):
+    periodo: str
     total_perdidas: float
-    cantidad_prestamos_perdidos: float
+    cantidad_prestamos_perdidos: int
     detalle: list
 
 class CuotaCobranzaOut(BaseModel):

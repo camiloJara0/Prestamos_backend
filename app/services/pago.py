@@ -64,20 +64,20 @@ def registrar_pago(db: Session, pago: PagoCreate, usuario_id: int):
     else:
         cuota.estado = "parcial"
 
-    prestamo.saldo_pendiente = round(prestamo.saldo_pendiente - (pago.capital_pagado + pago.interes_pagado), 2)
+    prestamo.saldo_pendiente = round(prestamo.saldo_pendiente - pago.capital_pagado, 2)
     if prestamo.saldo_pendiente <= 0:
         prestamo.saldo_pendiente = 0.0
         prestamo.estado = "pagado"
 
     capital_obj = db.query(Capital).first()
     if capital_obj:
-        capital_obj.monto_total += pago.valor_pagado
+        capital_obj.monto_total += pago.capital_pagado
 
     movimiento = MovimientoCapital(
         prestamo_id=pago.prestamo_id,
         tipo_movimiento="pago_recibido",
         descripcion=f"Pago de cuota #{cuota.numero_cuota} (Préstamo #{prestamo.id})",
-        valor=pago.valor_pagado,
+        valor=pago.capital_pagado,
         fecha=pago.fecha_pago
     )
     db.add(movimiento)

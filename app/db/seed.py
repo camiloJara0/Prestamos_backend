@@ -19,16 +19,16 @@ def seed():
 
     try:
         # 1. Usuario admin principal
-        if not db.query(Usuario).filter(Usuario.email == "admin@admin.com").first():
+        if not db.query(Usuario).filter(Usuario.email == "admin@test.com").first():
             usuario = Usuario(
                 nombre="Administrador",
-                email="admin@admin.com",
-                hashed_password=hash_password("admin123"),
+                email="admin@test.com",
+                hashed_password=hash_password("123456"),
                 rol="admin",
                 estado="activo"
             )
             db.add(usuario)
-            print("Usuario admin creado (admin@admin.com)")
+            print("Usuario admin creado (admin@test.com)")
         else:
             print("- Usuario admin ya existe")
 
@@ -82,7 +82,7 @@ def seed():
         configs = [
             {
                 "clave": "tasa_mora_diaria",
-                "valor": "0.5",
+                "valor": "1.0",
                 "descripcion": "Porcentaje de mora diaria por cuota vencida",
                 "tipo_valor": "float"
             },
@@ -109,8 +109,8 @@ def seed():
         db.commit()
 
         print("\nSeed completado exitosamente")
-        print("  Email: admin@admin.com")
-        print("  Password: admin123")
+        print("  Email: admin@test.com")
+        print("  Password: 123456")
 
     except Exception as e:
         db.rollback()
@@ -118,5 +118,6 @@ def seed():
     finally:
         db.close()
 
+seed()
 if __name__ == "__main__":
     seed()

@@ -21,7 +21,7 @@ def get_db():
         db.close()
 
 
-@router.post("/", response_model=PagoOut, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=PagoOut, status_code=status.HTTP_200_OK)
 def crear_pago(
     pago: PagoCreate,
     db: Session = Depends(get_db),
@@ -56,7 +56,7 @@ def crear_pago(
         registro_key = IdempotencyKey(
             key=str(key),
             response=json.dumps(pago_dict),
-            status_code=status.HTTP_201_CREATED,
+            status_code=status.HTTP_200_OK,
         )
         db.add(registro_key)
         db.commit()

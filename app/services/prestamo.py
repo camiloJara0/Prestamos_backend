@@ -2,7 +2,7 @@
 # calcula interes, monto total, genera cuotas y registra movimiento de capital
 # usa transacciones para garantizar consistencia en la DB
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from fastapi import HTTPException
 from datetime import date
 from dateutil.relativedelta import relativedelta
@@ -153,7 +153,17 @@ def get_prestamos(
     return paginate(query, page=page, limit=limit)
 
 def obtener_prestamo(db: Session, prestamo_id: int):
-    return db.query(Prestamo).filter(Prestamo.id == prestamo_id).first()
+    return (
+        db.query(Prestamo)
+        .options(
+            selectinload(Prestamo.cliente),
+            selectinload(Prestamo.tipo_prestamo),
+            selectinload(Prestamo.cuotas),
+            selectinload(Prestamo.pagos),
+        )
+        .filter(Prestamo.id == prestamo_id)
+        .first()
+    )
 
 def renovar_prestamo(db: Session, prestamo_id: int, renovacion):
     prestamo_original = db.query(Prestamo).filter(Prestamo.id == prestamo_id).first()

@@ -23,6 +23,7 @@ python-dotenv
 python-jose[cryptography]
 python-multipart
 pywebpush
+py-vapid
 redis
 reportlab
 sqlalchemy==2.0.48
