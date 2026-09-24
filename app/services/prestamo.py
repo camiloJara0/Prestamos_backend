@@ -2,6 +2,8 @@
 # calcula interes, monto total, genera cuotas y registra movimiento de capital
 # usa transacciones para garantizar consistencia en la DB
 
+import secrets
+import string
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 from datetime import date
@@ -12,6 +14,17 @@ from app.models.models import Prestamo, PrestamoCuota, MovimientoCapital, Capita
 from app.schemas.prestamo import PrestamoCreate
 from app.services.capital import get_or_create_capital
 from app.utils.pagination import paginate
+
+
+def generar_referencia_unica_cuota(prestamo_id: int, numero_cuota: int) -> str:
+    """
+    Genera un código de referencia de pago único e impredecible para cada cuota.
+    Ejemplo de salida: REF-P12C1-9F2B
+    """
+    caracteres = string.ascii_uppercase + string.digits
+    hash_aleatorio = ''.join(secrets.choice(caracteres) for _ in range(4))
+    return f"REF-P{prestamo_id}C{numero_cuota}-{hash_aleatorio}"
+
 
 def crear_prestamo(db: Session, prestamo: PrestamoCreate, usuario_id: int):
     cliente = db.query(Cliente).filter(Cliente.id == prestamo.cliente_id, Cliente.estado == "activo").first()
@@ -88,6 +101,7 @@ def crear_prestamo(db: Session, prestamo: PrestamoCreate, usuario_id: int):
             capital=val_capital,
             interes=val_interes,
             mora=0.0,
+            referencia_pago=generar_referencia_unica_cuota(db_prestamo.id, i),  # <-- REFERENCIA AUTO-GENERADA
             estado="pendiente"
         )
         db.add(cuota)
@@ -125,6 +139,7 @@ def crear_prestamo(db: Session, prestamo: PrestamoCreate, usuario_id: int):
     
     return db_prestamo
 
+
 def get_prestamos(
     db: Session, 
     page: int = 1, 
@@ -152,8 +167,10 @@ def get_prestamos(
     query = query.order_by(Prestamo.id.desc())
     return paginate(query, page=page, limit=limit)
 
+
 def obtener_prestamo(db: Session, prestamo_id: int):
     return db.query(Prestamo).filter(Prestamo.id == prestamo_id).first()
+
 
 def renovar_prestamo(db: Session, prestamo_id: int, renovacion):
     prestamo_original = db.query(Prestamo).filter(Prestamo.id == prestamo_id).first()
@@ -215,6 +232,7 @@ def renovar_prestamo(db: Session, prestamo_id: int, renovacion):
                 capital=v_cap,
                 interes=v_int,
                 mora=0.0,
+                referencia_pago=generar_referencia_unica_cuota(nuevo_prestamo.id, i),  # <-- REFERENCIA AUTO-GENERADA EN RENOVACIÓN
                 estado="pendiente"
             )
             db.add(cuota)
@@ -251,6 +269,7 @@ def renovar_prestamo(db: Session, prestamo_id: int, renovacion):
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error al renovar el prestamo: {str(e)}")
+
 
 def marcar_prestamo_perdido(db: Session, prestamo_id: int, datos):
     prestamo = db.query(Prestamo).filter(Prestamo.id == prestamo_id).first()
@@ -299,6 +318,7 @@ def marcar_prestamo_perdido(db: Session, prestamo_id: int, datos):
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error al marcar prestamo como perdido: {str(e)}")
+
 
 def ajustar_capital_prestamo(db: Session, prestamo_id: int, nuevo_capital: float, usuario_id: int):
     db_prestamo = db.query(Prestamo).filter(Prestamo.id == prestamo_id).first()

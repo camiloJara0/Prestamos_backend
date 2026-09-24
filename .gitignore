@@ -1,18 +1,43 @@
 # Base de datos
 *.db
+*.sqlite
+*.sqlite3
 
 # Python
 __pycache__/
 *.pyc
 *.pyo
 .env
+*.egg-info/
+.pytest_cache/
 
 # Archivos Criptográficos / Keys
 *.pem
+*.key
+*.crt
 
 # Virtual environment
 venv/
 env/
+ENV/
 
-# VS Code
+# VS Code & IDEs
 .vscode/
+.idea/
+
+# Uploads y archivos temporales generados por el sistema
+uploads/*
+!uploads/.gitkeep
+uploads/qr_codes/*
+!uploads/qr_codes/.gitkeep
+
+# Archivos exportados o temporales (Excel, PDF, CSV)
+*.xlsx
+*.xls
+*.pdf
+*.csv
+!app/templates/*.pdf 
+
+# Logs del sistema
+*.log
+logs/

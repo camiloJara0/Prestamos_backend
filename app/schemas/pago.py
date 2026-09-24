@@ -2,6 +2,7 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import date
 
+
 class PagoCreate(BaseModel):
     prestamo_id: int
     cliente_id: int
@@ -14,11 +15,12 @@ class PagoCreate(BaseModel):
     mora_pagada: float
     observaciones: Optional[str] = None
 
+
 class PagoOut(BaseModel):
     id: int
     prestamo_id: int
     cliente_id: int
-    cuota_id: int
+    cuota_id: Optional[int] = None
     tipo_pago_id: int
     fecha_pago: date
     valor_pagado: float
@@ -26,6 +28,7 @@ class PagoOut(BaseModel):
     interes_pagado: float
     mora_pagada: float
     observaciones: Optional[str] = None
+    referencia_pago: Optional[str] = None
 
     class Config:
         from_attributes = True

@@ -76,7 +76,7 @@ def registrar_pago(db: Session, pago: PagoCreate, usuario_id: int):
     movimiento = MovimientoCapital(
         prestamo_id=pago.prestamo_id,
         tipo_movimiento="pago_recibido",
-        descripcion=f"Pago de cuota #{cuota.numero_cuota} (Préstamo #{prestamo.id})",
+        descripcion=f"Pago de cuota #{cuota.numero_cuota} (Ref: {cuota.referencia_pago}) - Préstamo #{prestamo.id}",
         valor=pago.valor_pagado,
         fecha=pago.fecha_pago
     )
@@ -94,13 +94,14 @@ def registrar_pago(db: Session, pago: PagoCreate, usuario_id: int):
         registro_id=db_pago.id,
         valores_nuevos={
             "cuota_id": db_pago.cuota_id,
+            "referencia_pago": cuota.referencia_pago,
             "monto_pagado": db_pago.valor_pagado,
             "capital_pagado": db_pago.capital_pagado,
             "interes_pagado": db_pago.interes_pagado,
             "mora_pagada": db_pago.mora_pagada,
             "fecha_pago": str(db_pago.fecha_pago)
         },
-        descripcion=f"Pago registrado para cuota #{db_pago.cuota_id}"
+        descripcion=f"Pago registrado para cuota #{cuota.numero_cuota} con Ref: {cuota.referencia_pago}"
     )
 
     return db_pago

@@ -1,9 +1,16 @@
+import uuid
 from datetime import datetime, timezone
 from sqlalchemy import (
     Boolean, Column, Integer, String, Float, Date, DateTime, ForeignKey, Enum, Text
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, configure_mappers
 from app.models.base import Base
+from typing import Optional
+
+
+def generar_referencia():
+    """Genera una referencia única de 6 caracteres. Ejemplo: REF-8A2F9X"""
+    return f"REF-{uuid.uuid4().hex[:6].upper()}"
 
 
 class Cliente(Base):
@@ -81,6 +88,16 @@ class PrestamoCuota(Base):
     interes = Column(Float)
     mora = Column(Float)
     estado = Column(Enum("pendiente", "pagado", "vencido", "parcial", name="estado_cuota"), default="pendiente")
+    
+    referencia_pago = Column(
+        String(50), 
+        unique=True, 
+        index=True, 
+        default=generar_referencia, 
+        nullable=True
+    )
+    fecha_pago = Column(Date, nullable=True)
+    
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -99,6 +116,25 @@ class TipoPago(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     pagos = relationship("Pago", back_populates="tipo_pago")
+
+
+class MetodoPagoPrestamista(Base):
+    """Tabla para registrar las cuentas de Nequi, Daviplata, Bancolombia y QR del prestamista."""
+    __tablename__ = "metodos_pago_prestamista"
+
+    id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False)
+    banco = Column(String(50), nullable=False)        # Ej: Nequi, Daviplata, Bancolombia
+    tipo_cuenta = Column(String(50), default="Ahorros") # Ej: Ahorros, Corriente, Llave
+    numero_cuenta = Column(String(50), nullable=False)  # Número de cuenta o teléfono
+    titular = Column(String(100), nullable=False)       # Nombre del titular
+    documento_titular = Column(String(20), nullable=True) # Cédula/NIT para soporte tributario
+    qr_code_url = Column(String(255), nullable=True)   # Ruta/URL de la imagen del QR
+    activo = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    usuario = relationship("Usuario", back_populates="metodos_pago")
 
 
 class Pago(Base):
@@ -123,6 +159,11 @@ class Pago(Base):
     cliente = relationship("Cliente", back_populates="pagos")
     cuota = relationship("PrestamoCuota", back_populates="pagos")
     tipo_pago = relationship("TipoPago", back_populates="pagos")
+
+    @property
+    def referencia_pago(self) -> Optional[str]:
+        """Obtiene la referencia única de la cuota asociada a este pago para los recibos."""
+        return self.cuota.referencia_pago if self.cuota else None
 
 
 class MovimientoCapital(Base):
@@ -206,6 +247,11 @@ class Usuario(Base):
     auditorias = relationship("Auditoria", back_populates="usuario")
     push_subscriptions = relationship(
         "PushSubscription",
+        back_populates="usuario",
+        cascade="all, delete-orphan",
+    )
+    metodos_pago = relationship(
+        "MetodoPagoPrestamista",
         back_populates="usuario",
         cascade="all, delete-orphan",
     )
@@ -295,6 +341,6 @@ class PushSubscription(Base):
 
     usuario = relationship("Usuario", back_populates="push_subscriptions")
 
-# --- Al final del archivo app/models/models.py ---
-from sqlalchemy.orm import configure_mappers
+
+# Validar relaciones de SQLAlchemy
 configure_mappers()

@@ -10,7 +10,9 @@ from app.routes import (
     auth,
     capital,
     clientes,
+    conciliacion,
     dashboard,
+    metodos_pago,  # <-- 1. Importamos el router de métodos de pago y QR
     mora,
     notificacion,
     pago,
@@ -75,3 +77,5 @@ app.include_router(auditoria.router)
 app.include_router(notificacion.router)
 app.include_router(push.router)
 app.include_router(dashboard.router)
+app.include_router(conciliacion.router)
+app.include_router(metodos_pago.router)  
