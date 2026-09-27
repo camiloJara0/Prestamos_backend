@@ -1,11 +1,22 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import (
-    Boolean, Column, Integer, String, Float, Date, DateTime, ForeignKey, Enum, Text
-)
-from sqlalchemy.orm import relationship, configure_mappers
-from app.models.base import Base
 from typing import Optional
+
+from sqlalchemy import (
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+)
+from sqlalchemy.orm import configure_mappers, relationship
+
+from app.models.base import Base
 
 
 def generar_referencia():
@@ -72,7 +83,7 @@ class Prestamo(Base):
     cliente = relationship("Cliente", back_populates="prestamos")
     tipo_prestamo = relationship("TipoPrestamo", back_populates="prestamos")
     cuotas = relationship("PrestamoCuota", back_populates="prestamo")
-    pagos = relationship("Pago", back_populates="prestamo")
+    pagos = relationship("Pago", back_populates="pagos" if False else "prestamo")
 
 
 class PrestamoCuota(Base):
@@ -88,7 +99,7 @@ class PrestamoCuota(Base):
     interes = Column(Float)
     mora = Column(Float)
     estado = Column(Enum("pendiente", "pagado", "vencido", "parcial", name="estado_cuota"), default="pendiente")
-    
+
     referencia_pago = Column(
         String(50), 
         unique=True, 
@@ -97,7 +108,7 @@ class PrestamoCuota(Base):
         nullable=True
     )
     fecha_pago = Column(Date, nullable=True)
-    
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -152,6 +163,23 @@ class Pago(Base):
     interes_pagado = Column(Float)
     mora_pagada = Column(Float)
     observaciones = Column(Text)
+
+    # NUEVOS CAMPOS: Referencia de recibo y lógica de devolución
+    referencia_recibo = Column(
+        String(50),
+        unique=True,
+        index=True,
+        default=generar_referencia,
+        nullable=False,
+    )
+    estado_pago = Column(
+        Enum("confirmado", "devuelto", name="estado_pago"),
+        default="confirmado",
+        nullable=False,
+    )
+    fecha_devolucion = Column(DateTime, nullable=True)
+    motivo_devolucion = Column(Text, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -162,8 +190,8 @@ class Pago(Base):
 
     @property
     def referencia_pago(self) -> Optional[str]:
-        """Obtiene la referencia única de la cuota asociada a este pago para los recibos."""
-        return self.cuota.referencia_pago if self.cuota else None
+        """Obtiene la referencia única del pago/recibo."""
+        return self.referencia_recibo or (self.cuota.referencia_pago if self.cuota else None)
 
 
 class MovimientoCapital(Base):
