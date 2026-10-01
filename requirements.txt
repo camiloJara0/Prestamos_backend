@@ -13,6 +13,8 @@ httpx
 idna==3.11
 jwcrypto
 openpyxl
+pandas
+pdfplumber
 passlib[bcrypt]
 pydantic==2.12.5
 pydantic_core==2.41.5

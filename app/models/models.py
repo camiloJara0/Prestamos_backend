@@ -1,9 +1,27 @@
+import uuid
 from datetime import datetime, timezone
+from typing import Optional
+
 from sqlalchemy import (
-    Boolean, Column, Integer, String, Float, Date, DateTime, ForeignKey, Enum, Text
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import configure_mappers, relationship
+
 from app.models.base import Base
+
+
+def generar_referencia():
+    """Genera una referencia única de 6 caracteres. Ejemplo: REF-8A2F9X"""
+    return f"REF-{uuid.uuid4().hex[:6].upper()}"
 
 
 class Cliente(Base):
@@ -65,7 +83,7 @@ class Prestamo(Base):
     cliente = relationship("Cliente", back_populates="prestamos")
     tipo_prestamo = relationship("TipoPrestamo", back_populates="prestamos")
     cuotas = relationship("PrestamoCuota", back_populates="prestamo")
-    pagos = relationship("Pago", back_populates="prestamo")
+    pagos = relationship("Pago", back_populates="pagos" if False else "prestamo")
 
 
 class PrestamoCuota(Base):
@@ -81,6 +99,16 @@ class PrestamoCuota(Base):
     interes = Column(Float)
     mora = Column(Float)
     estado = Column(Enum("pendiente", "pagado", "vencido", "parcial", name="estado_cuota"), default="pendiente")
+
+    referencia_pago = Column(
+        String(50), 
+        unique=True, 
+        index=True, 
+        default=generar_referencia, 
+        nullable=True
+    )
+    fecha_pago = Column(Date, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -101,6 +129,25 @@ class TipoPago(Base):
     pagos = relationship("Pago", back_populates="tipo_pago")
 
 
+class MetodoPagoPrestamista(Base):
+    """Tabla para registrar las cuentas de Nequi, Daviplata, Bancolombia y QR del prestamista."""
+    __tablename__ = "metodos_pago_prestamista"
+
+    id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False)
+    banco = Column(String(50), nullable=False)        # Ej: Nequi, Daviplata, Bancolombia
+    tipo_cuenta = Column(String(50), default="Ahorros") # Ej: Ahorros, Corriente, Llave
+    numero_cuenta = Column(String(50), nullable=False)  # Número de cuenta o teléfono
+    titular = Column(String(100), nullable=False)       # Nombre del titular
+    documento_titular = Column(String(20), nullable=True) # Cédula/NIT para soporte tributario
+    qr_code_url = Column(String(255), nullable=True)   # Ruta/URL de la imagen del QR
+    activo = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    usuario = relationship("Usuario", back_populates="metodos_pago")
+
+
 class Pago(Base):
     __tablename__ = "pagos"
 
@@ -116,6 +163,23 @@ class Pago(Base):
     interes_pagado = Column(Float)
     mora_pagada = Column(Float)
     observaciones = Column(Text)
+
+    # NUEVOS CAMPOS: Referencia de recibo y lógica de devolución
+    referencia_recibo = Column(
+        String(50),
+        unique=True,
+        index=True,
+        default=generar_referencia,
+        nullable=False,
+    )
+    estado_pago = Column(
+        Enum("confirmado", "devuelto", name="estado_pago"),
+        default="confirmado",
+        nullable=False,
+    )
+    fecha_devolucion = Column(DateTime, nullable=True)
+    motivo_devolucion = Column(Text, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -123,6 +187,11 @@ class Pago(Base):
     cliente = relationship("Cliente", back_populates="pagos")
     cuota = relationship("PrestamoCuota", back_populates="pagos")
     tipo_pago = relationship("TipoPago", back_populates="pagos")
+
+    @property
+    def referencia_pago(self) -> Optional[str]:
+        """Obtiene la referencia única del pago/recibo."""
+        return self.referencia_recibo or (self.cuota.referencia_pago if self.cuota else None)
 
 
 class MovimientoCapital(Base):
@@ -206,6 +275,11 @@ class Usuario(Base):
     auditorias = relationship("Auditoria", back_populates="usuario")
     push_subscriptions = relationship(
         "PushSubscription",
+        back_populates="usuario",
+        cascade="all, delete-orphan",
+    )
+    metodos_pago = relationship(
+        "MetodoPagoPrestamista",
         back_populates="usuario",
         cascade="all, delete-orphan",
     )
@@ -295,6 +369,6 @@ class PushSubscription(Base):
 
     usuario = relationship("Usuario", back_populates="push_subscriptions")
 
-# --- Al final del archivo app/models/models.py ---
-from sqlalchemy.orm import configure_mappers
+
+# Validar relaciones de SQLAlchemy
 configure_mappers()

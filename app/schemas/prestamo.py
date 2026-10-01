@@ -42,6 +42,7 @@ class CuotaOut(BaseModel):
     capital: float
     interes: float
     mora: float
+    referencia_pago: Optional[str] = None  # <--- AGREGADO AQUÍ
     estado: str
 
     class Config:
