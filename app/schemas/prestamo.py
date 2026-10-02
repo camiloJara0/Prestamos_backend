@@ -76,3 +76,24 @@ class PrestamoPerdidoOut(BaseModel):
 class MarcarPerdidoRequest(BaseModel):
     motivo: Optional[str] = None
     fecha: date
+
+class ReestructuracionCreate(BaseModel):
+    numero_cuotas: int = Field(ge=1, le=120)
+    porcentaje_interes: float = Field(ge=0, le=100)
+    fecha_inicio: date
+    motivo: str = Field(min_length=5)
+
+class ReestructuracionOut(BaseModel):
+    id: int
+    prestamo_id: int
+    fecha: date
+    motivo: Optional[str] = None
+    saldo_anterior: float
+    numero_cuotas: int
+    porcentaje_interes: float
+    valor_cuota: float
+    monto_plan: float
+    estado: str
+
+    class Config:
+        from_attributes = True

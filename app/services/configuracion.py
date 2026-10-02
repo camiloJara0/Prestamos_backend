@@ -18,18 +18,31 @@ def get_todas_configuraciones(db: Session):
     return db.query(ConfiguracionSistema).filter(ConfiguracionSistema.activo == True).all()
 
 def actualizar_configuracion(db: Session, clave: str, datos: ConfiguracionUpdate):
-    """Actualiza una configuración existente"""
+    """Actualiza una configuración existente validando tipo y rango del valor."""
     config = get_configuracion_por_clave(db, clave)
-    config.valor = datos.valor
+    config.valor = _validar_valor(config.tipo_valor, datos.valor)
     if datos.descripcion:
         config.descripcion = datos.descripcion
     db.commit()
     db.refresh(config)
     return config
 
+def _validar_valor(tipo_valor: str, valor: str) -> str:
+    """RF-011: los valores numéricos deben ser no negativos."""
+    if tipo_valor in ("float", "int", "number"):
+        try:
+            numero = float(valor)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="El valor debe ser numérico.")
+        if numero < 0:
+            raise HTTPException(status_code=422, detail="El valor no puede ser negativo.")
+        if tipo_valor == "int" and not numero.is_integer():
+            raise HTTPException(status_code=422, detail="El valor debe ser un entero.")
+    return valor
+
 def crear_configuracion(db: Session, datos: ConfiguracionCreate):
     """Crea una nueva configuración"""
-    config = ConfiguracionSistema(**datos.dict())
+    config = ConfiguracionSistema(**datos.model_dump())
     db.add(config)
     db.commit()
     db.refresh(config)

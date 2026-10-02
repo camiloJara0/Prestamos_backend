@@ -130,6 +130,19 @@ def generar_recibo_pdf_bytes(datos: dict) -> io.BytesIO:
         ],
     ]
 
+    # Desglose del pago (capital, interés y mora) cuando el comprobante lo incluye
+    for etiqueta, clave in (
+        ("Capital:", "capital_pagado"),
+        ("Interés:", "interes_pagado"),
+        ("Mora:", "mora_pagada"),
+    ):
+        if clave in datos:
+            valor_fmt = f"${datos[clave]:,.0f}".replace(",", ".")
+            tabla_data.append([
+                Paragraph(f"<b>{etiqueta}</b>", label_style),
+                Paragraph(valor_fmt, val_style),
+            ])
+
     # Si está devuelto, agregamos la información del reverso a la tabla
     if es_devuelto and datos.get("motivo_devolucion"):
         fecha_dev_val = datos.get("fecha_devolucion", "N/A")

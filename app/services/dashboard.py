@@ -3,7 +3,7 @@ from datetime import date
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models.models import Capital, Mora, Pago, Prestamo, PrestamoCuota
+from app.models.models import Capital, Mora, MovimientoCapital, Pago, Prestamo, PrestamoCuota, PrestamoPerdido
 
 
 def obtener_resumen_dashboard(db: Session) -> dict:
@@ -40,9 +40,11 @@ def obtener_resumen_dashboard(db: Session) -> dict:
         db.query(func.coalesce(func.sum(Prestamo.monto_total), 0.0)).scalar()
     )
 
-    # 5. Ganancia neta (Suma del interés recaudado en los pagos)
+    # 5. Ganancia neta (interés recaudado, excluyendo pagos devueltos)
     ganancia_neta = (
-        db.query(func.coalesce(func.sum(Pago.interes_pagado), 0.0)).scalar()
+        db.query(func.coalesce(func.sum(Pago.interes_pagado), 0.0))
+        .filter(Pago.estado_pago != "devuelto")
+        .scalar()
     )
 
     # 6. Mora acumulada (Detecta automáticamente el atributo disponible en Mora o Cuotas)
@@ -99,6 +101,14 @@ def obtener_resumen_dashboard(db: Session) -> dict:
         .scalar()
     )
 
+    # 8. Pérdidas del tablero (RF-059): mismo criterio del reporte de pérdidas
+    total_perdidas = (
+        db.query(func.coalesce(func.sum(MovimientoCapital.valor), 0.0))
+        .filter(MovimientoCapital.tipo_movimiento == "perdida")
+        .scalar()
+    )
+    cantidad_prestamos_perdidos = db.query(func.count(PrestamoPerdido.id)).scalar() or 0
+
     return {
         "capital_actual": float(capital_actual),
         "prestamos_activos": prestamos_activos,
@@ -110,4 +120,6 @@ def obtener_resumen_dashboard(db: Session) -> dict:
         "monto_vencido": float(monto_vencido),
         "mora_pendiente": float(mora_pendiente),
         "cobro_del_dia": float(cobro_del_dia),
+        "total_perdidas": float(total_perdidas),
+        "cantidad_prestamos_perdidos": int(cantidad_prestamos_perdidos),
     }

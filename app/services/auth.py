@@ -157,7 +157,36 @@ def solicitar_reset_password(db: Session, email: str) -> str:
     usuario.reset_token_expires = ahora + timedelta(hours=1)
 
     db.commit()
+
+    _enviar_correo_reset(usuario, reset_token)
     return mensaje_estandar
+
+
+def _enviar_correo_reset(usuario: Usuario, reset_token: str) -> None:
+    """Envía el enlace de restablecimiento por correo (RF-006)."""
+    import os
+
+    from app.services.email import enviar_correo
+
+    base_url = (os.getenv("FRONTEND_URL") or "http://localhost:3000").rstrip("/")
+    enlace = f"{base_url}/restablecer?token={reset_token}"
+    asunto = "Recupera tu contraseña de LoanSoft"
+    texto = (
+        f"Hola {usuario.nombre}, solicitaste restablecer tu contraseña. "
+        f"Este enlace vence en 1 hora: {enlace}"
+    )
+    html = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto;">
+      <h2 style="color:#5B2D8E">Recuperación de contraseña</h2>
+      <p>Hola <b>{usuario.nombre}</b>,</p>
+      <p>Recibimos una solicitud para restablecer la contraseña de tu cuenta LoanSoft.</p>
+      <p><a href="{enlace}" style="background:#5B2D8E;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;display:inline-block">Restablecer contraseña</a></p>
+      <p>Si el botón no funciona, copia este enlace en tu navegador:</p>
+      <p style="word-break:break-all;color:#5B2D8E">{enlace}</p>
+      <p>El enlace vence en <b>1 hora</b> y solo puede usarse una vez. Si no solicitaste este cambio, ignora este correo.</p>
+    </div>
+    """
+    enviar_correo(usuario.email, asunto, html, texto_plano=texto)
 
 
 def resetear_password(db: Session, token: str, new_password: str) -> bool:

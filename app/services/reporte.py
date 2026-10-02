@@ -95,7 +95,7 @@ def get_reporte_perdidas(db: Session, desde: Optional[date] = None, hasta: Optio
     }
 
 def get_reporte_cobranza(db: Session, desde: Optional[date] = None, hasta: Optional[date] = None):
-    """Genera reporte de cobranza con cuotas por vencer, vencidas y pagadas"""
+    """Genera reporte de cobranza: agenda de cuotas y lo cobrado en el periodo (RF-047/RF-054)."""
     
     today = date.today()
     
@@ -116,20 +116,23 @@ def get_reporte_cobranza(db: Session, desde: Optional[date] = None, hasta: Optio
     ).all()
     
     # Cuotas pagadas
-    cuotas_pagadas = db.query(PrestamoCuota).join(Prestamo).join(Cliente).filter(
+    query_pagadas = db.query(PrestamoCuota).join(Prestamo).join(Cliente).filter(
         PrestamoCuota.estado == "pagado"
-    ).all()
+    )
+    if desde:
+        query_pagadas = query_pagadas.filter(PrestamoCuota.fecha_vencimiento >= desde)
+    if hasta:
+        query_pagadas = query_pagadas.filter(PrestamoCuota.fecha_vencimiento <= hasta)
+    cuotas_pagadas = query_pagadas.all()
     
-    # Aplicar filtros de fecha
+    # Aplicar filtros de fecha a la agenda
     if desde:
         cuotas_por_vencer = [c for c in cuotas_por_vencer if c.fecha_vencimiento >= desde]
         cuotas_vencidas = [c for c in cuotas_vencidas if c.fecha_vencimiento >= desde]
-        cuotas_pagadas = [c for c in cuotas_pagadas if c.fecha_vencimiento >= desde]
     
     if hasta:
         cuotas_por_vencer = [c for c in cuotas_por_vencer if c.fecha_vencimiento <= hasta]
         cuotas_vencidas = [c for c in cuotas_vencidas if c.fecha_vencimiento <= hasta]
-        cuotas_pagadas = [c for c in cuotas_pagadas if c.fecha_vencimiento <= hasta]
     
     # Monto pagado sobre cada cuota vencida para conocer su saldo real (RF-047)
     ids_vencidas = [c.id for c in cuotas_vencidas]
@@ -140,8 +143,42 @@ def get_reporte_cobranza(db: Session, desde: Optional[date] = None, hasta: Optio
         .all()
     ) if ids_vencidas else {}
 
+    # Lo cobrado en el periodo con su desglose, solo pagos confirmados (RF-054)
+    query_cobros = db.query(Pago).filter(Pago.estado_pago != "devuelto")
+    if desde:
+        query_cobros = query_cobros.filter(func.date(Pago.fecha_pago) >= desde)
+    if hasta:
+        query_cobros = query_cobros.filter(func.date(Pago.fecha_pago) <= hasta)
+    cobros_periodo = query_cobros.all()
+
+    totales_cobrados = {
+        "capital": round(sum(p.capital_pagado for p in cobros_periodo), 2),
+        "interes": round(sum(p.interes_pagado for p in cobros_periodo), 2),
+        "mora": round(sum(p.mora_pagada for p in cobros_periodo), 2),
+        "total": round(sum(p.valor_pagado for p in cobros_periodo), 2),
+    }
+
+    acumulado_por_dia: dict = {}
+    for p in cobros_periodo:
+        dia = str(p.fecha_pago).split("T")[0].split(" ")[0]
+        fila = acumulado_por_dia.setdefault(
+            dia, {"fecha": dia, "cantidad_pagos": 0, "capital": 0.0, "interes": 0.0, "mora": 0.0, "total": 0.0}
+        )
+        fila["cantidad_pagos"] += 1
+        fila["capital"] = round(fila["capital"] + p.capital_pagado, 2)
+        fila["interes"] = round(fila["interes"] + p.interes_pagado, 2)
+        fila["mora"] = round(fila["mora"] + p.mora_pagada, 2)
+        fila["total"] = round(fila["total"] + p.valor_pagado, 2)
+
+    nota = None
+    if not cobros_periodo:
+        nota = "Sin cobros registrados en el periodo seleccionado."
+
     return {
         "periodo": _label_periodo(desde, hasta),
+        "nota": nota,
+        "totales_cobrados": totales_cobrados,
+        "detalle_por_dia": sorted(acumulado_por_dia.values(), key=lambda f: f["fecha"]),
         "total_cuotas_por_vencer": len(cuotas_por_vencer),
         "monto_por_vencer": sum(c.valor_cuota for c in cuotas_por_vencer),
         "total_cuotas_vencidas": len(cuotas_vencidas),
@@ -189,46 +226,89 @@ def get_reporte_cobranza(db: Session, desde: Optional[date] = None, hasta: Optio
     }
 
 def get_reporte_cartera(db: Session, desde: Optional[date] = None, hasta: Optional[date] = None):
-    """Genera reporte de cartera con distribución de préstamos por estado"""
-    
-    # Préstamos activos
-    prestamos_activos = db.query(Prestamo).filter(Prestamo.estado == "activo").all()
-    
-    # Préstamos renovados
-    prestamos_renovados = db.query(Prestamo).filter(Prestamo.estado == "renovado").all()
-    
-    # Préstamos perdidos
-    prestamos_perdidos = db.query(Prestamo).filter(Prestamo.estado == "perdido").all()
-    
-    # Aplicar filtros de fecha
+    """Estado de la cartera: saldos por préstamo, antigüedad y distribución por estado (RF-053)."""
+
+    query = db.query(Prestamo)
     if desde:
-        prestamos_activos = [p for p in prestamos_activos if p.fecha_prestamo >= desde]
-        prestamos_renovados = [p for p in prestamos_renovados if p.fecha_prestamo >= desde]
-        prestamos_perdidos = [p for p in prestamos_perdidos if p.fecha_prestamo >= desde]
-    
+        query = query.filter(Prestamo.fecha_prestamo >= desde)
     if hasta:
-        prestamos_activos = [p for p in prestamos_activos if p.fecha_prestamo <= hasta]
-        prestamos_renovados = [p for p in prestamos_renovados if p.fecha_prestamo <= hasta]
-        prestamos_perdidos = [p for p in prestamos_perdidos if p.fecha_prestamo <= hasta]
-    
+        query = query.filter(Prestamo.fecha_prestamo <= hasta)
+    prestamos = query.order_by(Prestamo.fecha_prestamo.desc()).all()
+
+    def _de_estado(estado: str):
+        return [p for p in prestamos if p.estado == estado]
+
+    prestamos_activos = _de_estado("activo")
+    prestamos_renovados = _de_estado("renovado")
+    prestamos_perdidos = _de_estado("perdido")
+    prestamos_pagados = _de_estado("pagado")
+
     # Distribución por tipo de préstamo
     distribucion = {}
-    for p in prestamos_activos + prestamos_renovados + prestamos_perdidos:
+    for p in prestamos:
         tipo = p.tipo_prestamo.nombre if p.tipo_prestamo else "Desconocido"
         if tipo not in distribucion:
             distribucion[tipo] = {"cantidad": 0, "monto": 0}
         distribucion[tipo]["cantidad"] += 1
         distribucion[tipo]["monto"] += p.capital_prestado
-    
+
+    distribucion_por_estado = {
+        estado: {"cantidad": len(_de_estado(estado)), "monto": sum(p.capital_prestado for p in _de_estado(estado))}
+        for estado in ("activo", "pagado", "perdido", "renovado")
+    }
+
+    # Antigüedad de la cartera vigente (préstamos con saldo pendiente)
+    hoy = date.today()
+    rangos = [
+        ("0-30 días", 0, 30),
+        ("31-60 días", 31, 60),
+        ("61-90 días", 61, 90),
+        ("Más de 90 días", 91, None),
+    ]
+    antiguedad = {nombre: {"cantidad": 0, "saldo": 0.0} for nombre, _, _ in rangos}
+    for p in prestamos:
+        if p.saldo_pendiente <= 0:
+            continue
+        dias = max((hoy - p.fecha_prestamo).days, 0)
+        for nombre, min_dias, max_dias in rangos:
+            if dias >= min_dias and (max_dias is None or dias <= max_dias):
+                antiguedad[nombre]["cantidad"] += 1
+                antiguedad[nombre]["saldo"] = round(antiguedad[nombre]["saldo"] + p.saldo_pendiente, 2)
+                break
+
+    nota = None
+    if not prestamos:
+        nota = "Sin cartera vigente en el periodo seleccionado."
+
     return {
         "periodo": _label_periodo(desde, hasta),
+        "nota": nota,
+        "total_prestamos": len(prestamos),
+        "saldo_pendiente_total": round(sum(p.saldo_pendiente for p in prestamos), 2),
         "total_activos": len(prestamos_activos),
         "monto_activos": sum(p.capital_prestado for p in prestamos_activos),
+        "saldo_activos": round(sum(p.saldo_pendiente for p in prestamos_activos), 2),
         "total_renovados": len(prestamos_renovados),
         "monto_renovados": sum(p.capital_prestado for p in prestamos_renovados),
         "total_perdidos": len(prestamos_perdidos),
         "monto_perdidos": sum(p.capital_prestado for p in prestamos_perdidos),
-        "distribucion_por_tipo": distribucion
+        "total_pagados": len(prestamos_pagados),
+        "monto_pagados": sum(p.capital_prestado for p in prestamos_pagados),
+        "distribucion_por_tipo": distribucion,
+        "distribucion_por_estado": distribucion_por_estado,
+        "antiguedad": antiguedad,
+        "detalle": [
+            {
+                "prestamo_id": p.id,
+                "cliente": p.cliente.nombre if p.cliente else "Sin cliente",
+                "estado": p.estado,
+                "fecha_prestamo": str(p.fecha_prestamo),
+                "capital_prestado": p.capital_prestado,
+                "saldo_pendiente": p.saldo_pendiente,
+                "dias_antiguedad": max((hoy - p.fecha_prestamo).days, 0),
+            }
+            for p in prestamos
+        ],
     }
 
 def exportar_excel(db: Session, tipo: str, desde: Optional[date] = None, hasta: Optional[date] = None):
@@ -332,6 +412,124 @@ def exportar_excel(db: Session, tipo: str, desde: Optional[date] = None, hasta: 
         ws.row_dimensions[10].height = 10
         ws['A11'] = f"Periodo: {periodo}  |  Generado: {fecha_hoy}"
         ws['A11'].font = Font(name='Arial', size=8, color="AAAAAA", italic=True)
+
+    elif tipo == "cartera":
+        ws.title = "Reporte de Cartera"
+        datos = get_reporte_cartera(db, desde=desde, hasta=hasta)
+
+        for col, ancho in zip("ABCDE", (22, 26, 16, 20, 20)):
+            ws.column_dimensions[col].width = ancho
+
+        estilo_titulo(ws, "SISTEMA DE GESTIÓN DE PRÉSTAMOS", 1, cols=5)
+        ws.row_dimensions[2].height = 10
+
+        resumen = [
+            ("Total Préstamos", datos["total_prestamos"], NEGRO),
+            ("Saldo Pendiente Total", datos["saldo_pendiente_total"], ROJO),
+            ("Préstamos Activos", datos["total_activos"], VERDE),
+            ("Saldo por Cobrar (Activos)", datos["saldo_activos"], VERDE),
+            ("Préstamos Pagados", datos["total_pagados"], NEGRO),
+            ("Préstamos Renovados", datos["total_renovados"], NEGRO),
+            ("Préstamos Perdidos", datos["total_perdidos"], ROJO),
+        ]
+
+        for celda, texto in [("A3", "CONCEPTO"), ("B3", "VALOR")]:
+            estilo_encabezado(ws[celda])
+            ws[celda] = texto
+        ws.row_dimensions[3].height = 22
+
+        for i, (concepto, valor, color) in enumerate(resumen, start=4):
+            par = i % 2 == 0
+            ws.row_dimensions[i].height = 20
+            cell_a = ws[f'A{i}']
+            cell_b = ws[f'B{i}']
+            cell_a.value = concepto
+            cell_b.value = valor
+            estilo_dato(cell_a, par)
+            if isinstance(valor, float):
+                estilo_monto(cell_b, par, color)
+            else:
+                estilo_monto(cell_b, par, color)
+
+        fila_base = 4 + len(resumen) + 1
+        encabezados = ["PRÉSTAMO", "CLIENTE", "ESTADO", "SALDO PENDIENTE (COP)", "ANTIGÜEDAD (DÍAS)"]
+        for col, texto in enumerate(encabezados, start=1):
+            estilo_encabezado(ws.cell(row=fila_base, column=col, value=texto))
+        ws.row_dimensions[fila_base].height = 22
+
+        for i, d in enumerate(datos["detalle"], start=fila_base + 1):
+            par = i % 2 == 0
+            ws.row_dimensions[i].height = 20
+            valores = [
+                f"Préstamo #{d['prestamo_id']}",
+                d["cliente"],
+                d["estado"].upper(),
+                d["saldo_pendiente"],
+                d["dias_antiguedad"],
+            ]
+            for col, valor in enumerate(valores, start=1):
+                cell = ws.cell(row=i, column=col, value=valor)
+                if col == 4:
+                    estilo_monto(cell, par, ROJO)
+                else:
+                    estilo_dato(cell, par)
+
+        ultima = fila_base + len(datos["detalle"]) + 2
+        ws.cell(row=ultima, column=1).value = f"Periodo: {periodo}  |  Generado: {fecha_hoy}"
+        ws.cell(row=ultima, column=1).font = Font(name='Arial', size=8, color="AAAAAA", italic=True)
+
+    elif tipo == "cobranza":
+        ws.title = "Reporte de Cobranza"
+        datos = get_reporte_cobranza(db, desde=desde, hasta=hasta)
+        totales = datos["totales_cobrados"]
+
+        for col, ancho in zip("ABCDEF", (22, 22, 16, 18, 16, 20)):
+            ws.column_dimensions[col].width = ancho
+
+        estilo_titulo(ws, "SISTEMA DE GESTIÓN DE PRÉSTAMOS", 1, cols=6)
+        ws.row_dimensions[2].height = 10
+
+        for celda, texto in [("A3", "CONCEPTO"), ("B3", "VALOR (COP)")]:
+            estilo_encabezado(ws[celda])
+            ws[celda] = texto
+        ws.row_dimensions[3].height = 22
+
+        filas = [
+            ("Capital Cobrado", totales["capital"], NEGRO),
+            ("Interés Cobrado", totales["interes"], VERDE),
+            ("Mora Cobrada", totales["mora"], VERDE),
+            ("Total Cobrado", totales["total"], VERDE),
+        ]
+        for i, (concepto, valor, color) in enumerate(filas, start=4):
+            par = i % 2 == 0
+            ws.row_dimensions[i].height = 20
+            cell_a = ws[f'A{i}']
+            cell_b = ws[f'B{i}']
+            cell_a.value = concepto
+            cell_b.value = valor
+            estilo_dato(cell_a, par)
+            estilo_monto(cell_b, par, color)
+
+        fila_base = 9
+        encabezados = ["FECHA", "PAGOS", "CAPITAL (COP)", "INTERÉS (COP)", "MORA (COP)", "TOTAL (COP)"]
+        for col, texto in enumerate(encabezados, start=1):
+            estilo_encabezado(ws.cell(row=fila_base, column=col, value=texto))
+        ws.row_dimensions[fila_base].height = 22
+
+        for i, d in enumerate(datos["detalle_por_dia"], start=fila_base + 1):
+            par = i % 2 == 0
+            ws.row_dimensions[i].height = 20
+            valores = [d["fecha"], d["cantidad_pagos"], d["capital"], d["interes"], d["mora"], d["total"]]
+            for col, valor in enumerate(valores, start=1):
+                cell = ws.cell(row=i, column=col, value=valor)
+                if col >= 3:
+                    estilo_monto(cell, par, VERDE if col != 5 else NEGRO)
+                else:
+                    estilo_dato(cell, par)
+
+        ultima = fila_base + len(datos["detalle_por_dia"]) + 2
+        ws.cell(row=ultima, column=1).value = f"Periodo: {periodo}  |  Generado: {fecha_hoy}"
+        ws.cell(row=ultima, column=1).font = Font(name='Arial', size=8, color="AAAAAA", italic=True)
 
     else:
         ws.title = "Reporte de Pérdidas"
@@ -520,6 +718,126 @@ def exportar_pdf(db: Session, tipo: str, desde: Optional[date] = None, hasta: Op
             ('ROUNDEDCORNERS', [6]),
         ]))
         story.append(tabla_neta)
+
+    elif tipo == "cartera":
+        datos = get_reporte_cartera(db, desde=desde, hasta=hasta)
+
+        story.append(Paragraph("Estado de la Cartera", estilo_seccion))
+        story.append(HRFlowable(width="100%", thickness=2, color=MORADO_OSCURO, spaceAfter=10))
+
+        resumen_data = [
+            [Paragraph("<b>CONCEPTO</b>", ParagraphStyle('h', fontName='Helvetica-Bold', fontSize=11, textColor=BLANCO, alignment=TA_CENTER)),
+             Paragraph("<b>VALOR</b>", ParagraphStyle('h', fontName='Helvetica-Bold', fontSize=11, textColor=BLANCO, alignment=TA_CENTER))],
+            ["Total Préstamos", f"{datos['total_prestamos']}"],
+            ["Saldo Pendiente Total", f"$ {datos['saldo_pendiente_total']:,.2f}"],
+            ["Préstamos Activos", f"{datos['total_activos']} ($ {datos['saldo_activos']:,.2f} por cobrar)"],
+            ["Préstamos Pagados", f"{datos['total_pagados']}"],
+            ["Préstamos Renovados", f"{datos['total_renovados']}"],
+            ["Préstamos Perdidos", f"{datos['total_perdidos']}"],
+        ]
+        tabla = Table(resumen_data, colWidths=[3.5*inch, 3.5*inch])
+        tabla.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), MORADO_MEDIO),
+            ('TEXTCOLOR', (0, 0), (-1, 0), BLANCO),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [MORADO_CLARO, BLANCO]),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#CCCCCC")),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('LEFTPADDING', (0, 0), (-1, -1), 12),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+        ]))
+        story.append(tabla)
+        story.append(Spacer(1, 16))
+
+        story.append(Paragraph("Antigüedad del Saldo Pendiente", estilo_seccion))
+        story.append(HRFlowable(width="100%", thickness=2, color=MORADO_OSCURO, spaceAfter=10))
+        ant_data = [[
+            Paragraph("<b>RANGO</b>", ParagraphStyle('h2', fontName='Helvetica-Bold', fontSize=10, textColor=BLANCO, alignment=TA_CENTER)),
+            Paragraph("<b>PRÉSTAMOS</b>", ParagraphStyle('h3', fontName='Helvetica-Bold', fontSize=10, textColor=BLANCO, alignment=TA_CENTER)),
+            Paragraph("<b>SALDO (COP)</b>", ParagraphStyle('h4', fontName='Helvetica-Bold', fontSize=10, textColor=BLANCO, alignment=TA_CENTER)),
+        ]]
+        for nombre, info in datos["antiguedad"].items():
+            ant_data.append([nombre, str(info["cantidad"]), f"$ {info['saldo']:,.2f}"])
+        tabla_ant = Table(ant_data, colWidths=[2.5*inch, 2*inch, 2.5*inch])
+        tabla_ant.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), MORADO_MEDIO),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [MORADO_CLARO, BLANCO]),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#CCCCCC")),
+            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        story.append(tabla_ant)
+
+        if datos["nota"]:
+            story.append(Spacer(1, 12))
+            story.append(Paragraph(datos["nota"], estilo_pie))
+
+    elif tipo == "cobranza":
+        datos = get_reporte_cobranza(db, desde=desde, hasta=hasta)
+        totales = datos["totales_cobrados"]
+
+        story.append(Paragraph("Lo Cobrado en el Periodo", estilo_seccion))
+        story.append(HRFlowable(width="100%", thickness=2, color=MORADO_OSCURO, spaceAfter=10))
+
+        cob_data = [
+            [Paragraph("<b>CONCEPTO</b>", ParagraphStyle('h', fontName='Helvetica-Bold', fontSize=11, textColor=BLANCO, alignment=TA_CENTER)),
+             Paragraph("<b>VALOR (COP)</b>", ParagraphStyle('h', fontName='Helvetica-Bold', fontSize=11, textColor=BLANCO, alignment=TA_CENTER))],
+            ["Capital Cobrado", f"$ {totales['capital']:,.2f}"],
+            ["Interés Cobrado", f"$ {totales['interes']:,.2f}"],
+            ["Mora Cobrada", f"$ {totales['mora']:,.2f}"],
+            ["Total Cobrado", f"$ {totales['total']:,.2f}"],
+        ]
+        tabla = Table(cob_data, colWidths=[4*inch, 3*inch])
+        tabla.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), MORADO_MEDIO),
+            ('TEXTCOLOR', (0, 0), (-1, 0), BLANCO),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [MORADO_CLARO, BLANCO]),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#CCCCCC")),
+            ('ALIGN', (1, 1), (1, -1), 'RIGHT'),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('LEFTPADDING', (0, 0), (-1, -1), 12),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+        ]))
+        story.append(tabla)
+        story.append(Spacer(1, 16))
+
+        story.append(Paragraph("Detalle por Día", estilo_seccion))
+        story.append(HRFlowable(width="100%", thickness=2, color=MORADO_OSCURO, spaceAfter=10))
+
+        dia_data = [[
+            Paragraph("<b>FECHA</b>", ParagraphStyle('d1', fontName='Helvetica-Bold', fontSize=10, textColor=BLANCO, alignment=TA_CENTER)),
+            Paragraph("<b>PAGOS</b>", ParagraphStyle('d2', fontName='Helvetica-Bold', fontSize=10, textColor=BLANCO, alignment=TA_CENTER)),
+            Paragraph("<b>CAPITAL</b>", ParagraphStyle('d3', fontName='Helvetica-Bold', fontSize=10, textColor=BLANCO, alignment=TA_CENTER)),
+            Paragraph("<b>INTERÉS</b>", ParagraphStyle('d4', fontName='Helvetica-Bold', fontSize=10, textColor=BLANCO, alignment=TA_CENTER)),
+            Paragraph("<b>MORA</b>", ParagraphStyle('d5', fontName='Helvetica-Bold', fontSize=10, textColor=BLANCO, alignment=TA_CENTER)),
+            Paragraph("<b>TOTAL</b>", ParagraphStyle('d6', fontName='Helvetica-Bold', fontSize=10, textColor=BLANCO, alignment=TA_CENTER)),
+        ]]
+        for d in datos["detalle_por_dia"]:
+            dia_data.append([
+                d["fecha"], str(d["cantidad_pagos"]),
+                f"$ {d['capital']:,.0f}", f"$ {d['interes']:,.0f}",
+                f"$ {d['mora']:,.0f}", f"$ {d['total']:,.0f}",
+            ])
+        tabla_dias = Table(dia_data, colWidths=[1.3*inch, 0.9*inch, 1.2*inch, 1.2*inch, 1.1*inch, 1.3*inch])
+        tabla_dias.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), MORADO_MEDIO),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [MORADO_CLARO, BLANCO]),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#CCCCCC")),
+            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 9),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        story.append(tabla_dias)
+
+        if datos["nota"]:
+            story.append(Spacer(1, 12))
+            story.append(Paragraph(datos["nota"], estilo_pie))
 
     else:
         datos = get_reporte_perdidas(db, desde=desde, hasta=hasta)

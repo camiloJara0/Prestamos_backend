@@ -1,10 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 from app.db.database import SessionLocal
 from app.dependencies.auth import get_current_user
 from app.services.mora import procesar_moras, get_moras, get_moras_prestamo, get_mora, update_mora, delete_mora
 from app.schemas.mora import MoraOut, MoraUpdate
 from app.schemas.pagination import PaginatedResponse
+
+def _ip(request: Request) -> str | None:
+    return request.client.host if request.client else None
 
 # Se ajusta el prefijo a /mora para coincidir con las llamadas del cliente
 router = APIRouter(prefix="/mora", tags=["Moras"])
@@ -54,6 +57,7 @@ def obtener_mora(
 def editar_mora(
     mora_id: int,
     payload: MoraUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
@@ -63,7 +67,7 @@ def editar_mora(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Acceso denegado. Requiere rol de administrador."
         )
-    mora = update_mora(db, mora_id, payload)
+    mora = update_mora(db, mora_id, payload, usuario_id=current_user.get("sub"), ip_address=_ip(request))
     if not mora:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -74,6 +78,7 @@ def editar_mora(
 @router.delete("/{mora_id}")
 def eliminar_mora(
     mora_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
@@ -83,7 +88,7 @@ def eliminar_mora(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Acceso denegado. Requiere rol de administrador."
         )
-    mora = delete_mora(db, mora_id)
+    mora = delete_mora(db, mora_id, usuario_id=current_user.get("sub"), ip_address=_ip(request))
     if not mora:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

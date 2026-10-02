@@ -3,16 +3,16 @@
 # GET /prestamos : lista los prestamos con filtros y paginación
 # GET /prestamos/{id} : detalle completo con cuotas, pagos y cliente
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from datetime import date
 from typing import Optional
 
 from app.db.database import SessionLocal
-from app.schemas.prestamo import PrestamoCreate, PrestamoOut, PrestamoDetalleOut, RenovacionCreate, MarcarPerdidoRequest
+from app.schemas.prestamo import PrestamoCreate, PrestamoOut, PrestamoDetalleOut, RenovacionCreate, MarcarPerdidoRequest, ReestructuracionCreate, ReestructuracionOut
 from app.schemas.pagination import PaginatedResponse
-from app.services.prestamo import crear_prestamo, get_prestamos, obtener_prestamo, renovar_prestamo, marcar_prestamo_perdido, ajustar_capital_prestamo
-from app.dependencies.auth import get_current_user
+from app.services.prestamo import crear_prestamo, get_prestamos, obtener_prestamo, renovar_prestamo, marcar_prestamo_perdido, ajustar_capital_prestamo, reestructurar_prestamo
+from app.dependencies.auth import get_current_user, require_rol
 from app.services import prestamo as services
 
 router = APIRouter(prefix="/prestamos", tags=["Prestamos"])
@@ -24,9 +24,17 @@ def get_db():
     finally:
         db.close()
 
+def _ip(request: Request) -> str | None:
+    return request.client.host if request.client else None
+
 @router.post("/", response_model=PrestamoOut)
-def crear(prestamo: PrestamoCreate, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    return services.crear_prestamo(db, prestamo, current_user["sub"])
+def crear(
+    prestamo: PrestamoCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    return services.crear_prestamo(db, prestamo, current_user["sub"], ip_address=_ip(request))
 
 @router.get("/", response_model=PaginatedResponse[PrestamoOut])
 def listar(
@@ -59,24 +67,37 @@ def obtener(prestamo_id: int, db: Session = Depends(get_db), current_user: dict 
     return db_prestamo
 
 @router.post("/{prestamo_id}/renovar", response_model=PrestamoOut)
-def renovar(prestamo_id: int, renovacion: RenovacionCreate, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    return renovar_prestamo(db, prestamo_id, renovacion)
+def renovar(
+    prestamo_id: int,
+    renovacion: RenovacionCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    return renovar_prestamo(db, prestamo_id, renovacion, usuario_id=current_user.get("sub"), ip_address=_ip(request))
 
 @router.post("/{prestamo_id}/marcar_perdido")
-def marcar_perdido(prestamo_id: int, datos: MarcarPerdidoRequest, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    return marcar_prestamo_perdido(db, prestamo_id, datos)
+def marcar_perdido(
+    prestamo_id: int,
+    datos: MarcarPerdidoRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    return marcar_prestamo_perdido(db, prestamo_id, datos, usuario_id=current_user.get("sub"), ip_address=_ip(request))
 
 @router.put("/{prestamo_id}/ajustar-capital")
 def ajustar_capital(
     prestamo_id: int,
     nuevo_capital: float,
+    request: Request,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_rol("admin"))
 ):
-    if current_user["rol"] != "admin":
-        raise HTTPException(status_code=403, detail="Solo administradores pueden ajustar capital")
-    
-    prestamo = ajustar_capital_prestamo(db, prestamo_id, nuevo_capital, usuario_id=current_user["sub"])
+    prestamo = ajustar_capital_prestamo(
+        db, prestamo_id, nuevo_capital,
+        usuario_id=current_user["sub"], ip_address=_ip(request),
+    )
     return {
         "mensaje": "Capital ajustado exitosamente",
         "prestamo_id": prestamo.id,
@@ -84,3 +105,18 @@ def ajustar_capital(
         "monto_total": prestamo.monto_total,
         "valor_cuota": prestamo.valor_cuota
     }
+
+
+@router.post("/{prestamo_id}/reestructurar", response_model=ReestructuracionOut)
+def reestructurar(
+    prestamo_id: int,
+    datos: ReestructuracionCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_rol("admin")),
+):
+    """Genera un plan de cuotas nuevo para un préstamo en mora (RF-035). Solo administrador."""
+    return reestructurar_prestamo(
+        db, prestamo_id, datos,
+        usuario_id=current_user["sub"], ip_address=_ip(request),
+    )

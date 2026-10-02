@@ -1,10 +1,10 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import date
 
 class MovimientoCapitalCreate(BaseModel):
     tipo_movimiento: str  # "inversion" o "retiro"
-    descripcion: Optional[str] = None
+    descripcion: str = Field(min_length=5)  # concepto obligatorio (RF-051)
     valor: float
     fecha: date
 
@@ -14,6 +14,7 @@ class MovimientoCapitalOut(BaseModel):
     descripcion: Optional[str] = None
     valor: float
     fecha: date
+    prestamo_id: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -24,3 +25,11 @@ class CapitalOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+class ResumenCajaOut(BaseModel):
+    periodo: str
+    ingresos: float
+    egresos: float
+    cantidad_ingresos: int
+    cantidad_egresos: int
+    saldo_capital: float

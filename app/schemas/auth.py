@@ -1,5 +1,5 @@
 from typing import Optional
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 # --- Esquemas de Autenticación Básica ---
 
@@ -27,7 +27,7 @@ class TokenRefreshResponse(BaseModel):
 
 class ChangePasswordRequest(BaseModel):
     password_actual: str
-    password_nuevo: str
+    password_nuevo: str = Field(min_length=6, max_length=128)
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -36,7 +36,7 @@ class ForgotPasswordRequest(BaseModel):
 
 class ResetPasswordRequest(BaseModel):
     token: str
-    new_password: str
+    new_password: str = Field(min_length=6, max_length=128)
 
 
 class MessageResponse(BaseModel):

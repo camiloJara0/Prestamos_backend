@@ -21,3 +21,7 @@ class DashboardResumenOut(BaseModel):
     monto_vencido: float = 0.0
     mora_pendiente: float = 0.0
     cobro_del_dia: float = 0.0
+
+    # Indicadores de pérdidas (RF-059)
+    total_perdidas: float = 0.0
+    cantidad_prestamos_perdidos: int = 0

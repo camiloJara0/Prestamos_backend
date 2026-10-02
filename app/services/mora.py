@@ -49,21 +49,54 @@ def get_moras_prestamo(db: Session, prestamo_id: int):
 def get_mora(db: Session, mora_id: int):
     return db.query(Mora).filter(Mora.id == mora_id).first()
 
-def update_mora(db: Session, mora_id: int, mora: MoraUpdate):
+def update_mora(db: Session, mora_id: int, mora: MoraUpdate, usuario_id=None, ip_address: str | None = None):
     db_mora = get_mora(db, mora_id)
     if not db_mora:
         return None
+    anteriores = {"valor": db_mora.valor, "estado": db_mora.estado, "fecha": str(db_mora.fecha)}
     for key, value in mora.dict(exclude_unset=True).items():
         setattr(db_mora, key, value)
     db.commit()
     db.refresh(db_mora)
+
+    from app.services.auditoria import registrar_auditoria
+    registrar_auditoria(
+        db,
+        usuario_id=usuario_id,
+        tabla_afectada="moras",
+        tipo_operacion="UPDATE",
+        registro_id=db_mora.id,
+        valores_anteriores=anteriores,
+        valores_nuevos={"valor": db_mora.valor, "estado": db_mora.estado, "fecha": str(db_mora.fecha)},
+        descripcion=f"Mora #{db_mora.id} editada manualmente",
+        ip_address=ip_address,
+    )
     return db_mora
 
-def delete_mora(db: Session, mora_id: int):
+def delete_mora(db: Session, mora_id: int, usuario_id=None, ip_address: str | None = None):
     db_mora = get_mora(db, mora_id)
     if db_mora:
+        anteriores = {
+            "prestamo_id": db_mora.prestamo_id,
+            "cuota_id": db_mora.cuota_id,
+            "valor": db_mora.valor,
+            "estado": db_mora.estado,
+        }
+        registro_id = db_mora.id
         db.delete(db_mora)
         db.commit()
+
+        from app.services.auditoria import registrar_auditoria
+        registrar_auditoria(
+            db,
+            usuario_id=usuario_id,
+            tabla_afectada="moras",
+            tipo_operacion="DELETE",
+            registro_id=registro_id,
+            valores_anteriores=anteriores,
+            descripcion=f"Mora #{registro_id} eliminada manualmente",
+            ip_address=ip_address,
+        )
     return db_mora
 
 def calcular_mora(db: Session, cuota: PrestamoCuota, pago: Pago = None) -> Mora | None:

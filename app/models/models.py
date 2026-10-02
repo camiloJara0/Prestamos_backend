@@ -84,6 +84,7 @@ class Prestamo(Base):
     tipo_prestamo = relationship("TipoPrestamo", back_populates="prestamos")
     cuotas = relationship("PrestamoCuota", back_populates="prestamo")
     pagos = relationship("Pago", back_populates="pagos" if False else "prestamo")
+    reestructuraciones = relationship("PrestamoReestructuracion", back_populates="prestamo")
 
 
 class PrestamoCuota(Base):
@@ -99,6 +100,7 @@ class PrestamoCuota(Base):
     interes = Column(Float)
     mora = Column(Float)
     estado = Column(Enum("pendiente", "pagado", "vencido", "parcial", name="estado_cuota"), default="pendiente")
+    reestructuracion_id = Column(Integer, ForeignKey("prestamos_reestructuraciones.id"), nullable=True)
 
     referencia_pago = Column(
         String(50), 
@@ -204,6 +206,7 @@ class MovimientoCapital(Base):
         "prestamo_otorgado",
         "pago_recibido",
         "ajuste_prestamo",
+        "devolucion_pago",
         "perdida",
         name="tipo_movimiento"
     ))
@@ -223,6 +226,25 @@ class PrestamoRenovacion(Base):
     fecha = Column(Date)
     observaciones = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PrestamoReestructuracion(Base):
+    """Plan de reestructuración de un préstamo en mora (RF-035)."""
+    __tablename__ = "prestamos_reestructuraciones"
+
+    id = Column(Integer, primary_key=True, index=True)
+    prestamo_id = Column(Integer, ForeignKey("prestamos.id"))
+    fecha = Column(Date)
+    motivo = Column(Text)
+    saldo_anterior = Column(Float)
+    numero_cuotas = Column(Integer)
+    porcentaje_interes = Column(Float)
+    valor_cuota = Column(Float)
+    monto_plan = Column(Float)
+    estado = Column(String(20), default="activa")  # activa | cerrada
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    prestamo = relationship("Prestamo", back_populates="reestructuraciones")
 
 
 class Mora(Base):

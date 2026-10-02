@@ -46,7 +46,7 @@ def _validar_pago(db: Session, pago: PagoCreate):
     return cuota, prestamo
 
 
-def registrar_pago(db: Session, pago: PagoCreate, usuario_id: int):
+def registrar_pago(db: Session, pago: PagoCreate, usuario_id: int, ip_address: str | None = None):
     cuota, prestamo = _validar_pago(db, pago)
 
     fecha_pago_val = pago.fecha_pago or datetime.now(timezone.utc)
@@ -120,13 +120,14 @@ def registrar_pago(db: Session, pago: PagoCreate, usuario_id: int):
             "mora_pagada": db_pago.mora_pagada,
             "fecha_pago": str(db_pago.fecha_pago)
         },
-        descripcion=f"Pago registrado para cuota #{cuota.numero_cuota} con Recibo: {referencia_recibo}"
+        descripcion=f"Pago registrado para cuota #{cuota.numero_cuota} con Recibo: {referencia_recibo}",
+        ip_address=ip_address,
     )
 
     return db_pago
 
 
-def devolver_pago(db: Session, pago_id: int, datos_devolucion: PagoDevolucionCreate, usuario_id: int):
+def devolver_pago(db: Session, pago_id: int, datos_devolucion: PagoDevolucionCreate, usuario_id: int, ip_address: str | None = None):
     db_pago = db.query(Pago).filter(Pago.id == pago_id).first()
     if not db_pago:
         raise HTTPException(status_code=404, detail="Pago no encontrado")
@@ -179,7 +180,8 @@ def devolver_pago(db: Session, pago_id: int, datos_devolucion: PagoDevolucionCre
         total_abonado_restante = sum(p.valor_pagado for p in pagos_restantes)
 
         if total_abonado_restante <= 0:
-            cuota.estado = "pendiente"
+            # Una cuota revertida sin abonos vuelve a su estado real de vencimiento
+            cuota.estado = "vencido" if cuota.fecha_vencimiento < date.today() else "pendiente"
         else:
             cuota.estado = "parcial"
 
@@ -218,7 +220,8 @@ def devolver_pago(db: Session, pago_id: int, datos_devolucion: PagoDevolucionCre
             "fecha_devolucion": str(db_pago.fecha_devolucion),
             "motivo_devolucion": db_pago.motivo_devolucion
         },
-        descripcion=f"Devolución de pago Recibo {db_pago.referencia_recibo}. Motivo: {datos_devolucion.motivo_devolucion}"
+        descripcion=f"Devolución de pago Recibo {db_pago.referencia_recibo}. Motivo: {datos_devolucion.motivo_devolucion}",
+        ip_address=ip_address,
     )
 
     return db_pago

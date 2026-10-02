@@ -111,7 +111,7 @@ def reporte_cobranza(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """Reporte de cobranza: información financiera de la empresa"""
+    """Reporte de cobranza: agenda y lo cobrado en el periodo (RF-054)"""
     return get_reporte_cobranza(db, desde=desde, hasta=hasta)
 
 @router.get("/cartera")
@@ -121,5 +121,61 @@ def reporte_cartera(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """Reporte de cartera: información financiera de la empresa"""
+    """Reporte de cartera: saldos, antigüedad y distribución por estado (RF-053)"""
     return get_reporte_cartera(db, desde=desde, hasta=hasta)
+
+@router.get("/cartera/excel")
+def cartera_excel(
+    desde: Optional[date] = Query(None),
+    hasta: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    buffer = exportar_excel(db, "cartera", desde=desde, hasta=hasta)
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=cartera.xlsx"}
+    )
+
+@router.get("/cartera/pdf")
+def cartera_pdf(
+    desde: Optional[date] = Query(None),
+    hasta: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    buffer = exportar_pdf(db, "cartera", desde=desde, hasta=hasta)
+    return StreamingResponse(
+        buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=cartera.pdf"}
+    )
+
+@router.get("/cobranza/excel")
+def cobranza_excel(
+    desde: Optional[date] = Query(None),
+    hasta: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    buffer = exportar_excel(db, "cobranza", desde=desde, hasta=hasta)
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=cobranza.xlsx"}
+    )
+
+@router.get("/cobranza/pdf")
+def cobranza_pdf(
+    desde: Optional[date] = Query(None),
+    hasta: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    buffer = exportar_pdf(db, "cobranza", desde=desde, hasta=hasta)
+    return StreamingResponse(
+        buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=cobranza.pdf"}
+    )

@@ -1,11 +1,11 @@
 import json
 from datetime import date
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 
 from app.db.database import SessionLocal
-from app.dependencies.auth import get_current_user
+from app.dependencies.auth import get_current_user, require_rol
 from app.models import IdempotencyKey, PrestamoCuota, Prestamo, Cliente, Pago, Usuario
 from app.schemas.pago import PagoCreate, PagoOut, PagoDevolucionCreate, PagoHistorialOut
 from app.schemas.pagination import PaginatedResponse
@@ -21,6 +21,10 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def _ip(request: Request) -> str | None:
+    return request.client.host if request.client else None
 
 
 def _obtener_usuario_id(current_user: dict, db: Session) -> int:
@@ -40,6 +44,7 @@ def _obtener_usuario_id(current_user: dict, db: Session) -> int:
 @router.post("/", response_model=PagoOut, status_code=status.HTTP_200_OK)
 def crear_pago(
     pago: PagoCreate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
     x_idempotency_key: str | None = Header(None, alias="X-Idempotency-Key"),
@@ -63,7 +68,7 @@ def crear_pago(
     usuario_id = _obtener_usuario_id(current_user, db)
 
     # 3. Registrar el pago en la base de datos
-    nuevo_pago = registrar_pago(db, pago, usuario_id=usuario_id)
+    nuevo_pago = registrar_pago(db, pago, usuario_id=usuario_id, ip_address=_ip(request))
 
     # 4. Convertir a esquema y guardar clave de idempotencia
     pago_dict = PagoOut.model_validate(nuevo_pago).model_dump(mode="json")
@@ -122,42 +127,33 @@ def obtener_pago(
 def solicitar_devolucion_pago(
     pago_id: int,
     datos_devolucion: PagoDevolucionCreate,
+    request: Request,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_rol("admin")),
 ):
     """
     Anula/Devuelve un pago previamente registrado dentro del margen máximo de 30 días,
-    realizando la reversión en cascada de cuota, préstamo, saldo global y auditoría.
+    realizando la reversión en cascada de cuota, préstamo, saldo global y auditoría (RF-042).
+    Solo administrador.
     """
     usuario_id = _obtener_usuario_id(current_user, db)
     pago_devuelto = devolver_pago(
         db=db,
         pago_id=pago_id,
         datos_devolucion=datos_devolucion,
-        usuario_id=usuario_id
+        usuario_id=usuario_id,
+        ip_address=_ip(request),
     )
     return pago_devuelto
 
 
-@router.get("/cuota/{cuota_id}/recibo-pdf")
-def descargar_recibo_cuota_pdf(
-    cuota_id: int,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
-):
-    """
-    Genera y descarga en tiempo real el recibo en PDF de una cuota pagada.
-    """
-    cuota = db.query(PrestamoCuota).filter(PrestamoCuota.id == cuota_id).first()
-    if not cuota:
-        raise HTTPException(status_code=404, detail="La cuota no existe.")
-
+def _construir_datos_recibo(db: Session, cuota: PrestamoCuota, pago_registro: Pago | None) -> dict:
+    """Arma los datos del comprobante PDF para una cuota y su pago (RF-043)."""
     prestamo = db.query(Prestamo).filter(Prestamo.id == cuota.prestamo_id).first()
     cliente = db.query(Cliente).filter(Cliente.id == prestamo.cliente_id).first()
-    pago_registro = db.query(Pago).filter(Pago.cuota_id == cuota.id).order_by(Pago.id.desc()).first()
 
     metodo_pago_nombre = "Transferencia / Efectivo"
-    
+
     if pago_registro and pago_registro.fecha_pago:
         fecha_bruta = pago_registro.fecha_pago
     elif cuota.fecha_pago:
@@ -185,11 +181,60 @@ def descargar_recibo_cuota_pdf(
         "metodo_pago": metodo_pago_nombre
     }
 
+    if pago_registro:
+        datos_recibo["capital_pagado"] = pago_registro.capital_pagado
+        datos_recibo["interes_pagado"] = pago_registro.interes_pagado
+        datos_recibo["mora_pagada"] = pago_registro.mora_pagada
+        if pago_registro.estado_pago == "devuelto":
+            datos_recibo["fecha_devolucion"] = str(pago_registro.fecha_devolucion or "")
+            datos_recibo["motivo_devolucion"] = pago_registro.motivo_devolucion
+
+    return datos_recibo
+
+
+def _responder_pdf(datos_recibo: dict) -> Response:
     pdf_bytes = generar_recibo_pdf_bytes(datos_recibo)
     nombre_archivo = f"Recibo_{datos_recibo['referencia_recibo']}.pdf"
-
     return Response(
         content=pdf_bytes.getvalue(),
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={nombre_archivo}"}
     )
+
+
+@router.get("/cuota/{cuota_id}/recibo-pdf")
+def descargar_recibo_cuota_pdf(
+    cuota_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Genera y descarga en tiempo real el recibo en PDF de una cuota pagada.
+    """
+    cuota = db.query(PrestamoCuota).filter(PrestamoCuota.id == cuota_id).first()
+    if not cuota:
+        raise HTTPException(status_code=404, detail="La cuota no existe.")
+
+    pago_registro = db.query(Pago).filter(Pago.cuota_id == cuota.id).order_by(Pago.id.desc()).first()
+    return _responder_pdf(_construir_datos_recibo(db, cuota, pago_registro))
+
+
+@router.get("/{pago_id}/comprobante")
+def descargar_comprobante_pago(
+    pago_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Comprobante PDF de un pago específico, con su desglose de capital, interés y mora (RF-043).
+    Si el pago fue devuelto, el documento incluye la marca de anulación y su motivo.
+    """
+    pago_registro = db.query(Pago).filter(Pago.id == pago_id).first()
+    if not pago_registro:
+        raise HTTPException(status_code=404, detail="El pago especificado no existe.")
+
+    cuota = db.query(PrestamoCuota).filter(PrestamoCuota.id == pago_registro.cuota_id).first()
+    if not cuota:
+        raise HTTPException(status_code=404, detail="La cuota asociada al pago no existe.")
+
+    return _responder_pdf(_construir_datos_recibo(db, cuota, pago_registro))

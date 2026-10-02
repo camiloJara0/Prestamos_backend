@@ -9,9 +9,9 @@ from sqlalchemy.orm import Session, selectinload
 from fastapi import HTTPException
 from datetime import date
 from dateutil.relativedelta import relativedelta
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 
-from app.models.models import Prestamo, PrestamoCuota, MovimientoCapital, Capital, Cliente, TipoPrestamo, PrestamoRenovacion, PrestamoPerdido, Mora
+from app.models.models import Prestamo, PrestamoCuota, MovimientoCapital, Capital, Cliente, TipoPrestamo, PrestamoRenovacion, PrestamoPerdido, PrestamoReestructuracion, Mora, Pago
 from app.schemas.prestamo import PrestamoCreate
 from app.services.capital import get_or_create_capital
 from app.utils.pagination import paginate
@@ -27,7 +27,7 @@ def generar_referencia_unica_cuota(prestamo_id: int, numero_cuota: int) -> str:
     return f"REF-P{prestamo_id}C{numero_cuota}-{hash_aleatorio}"
 
 
-def crear_prestamo(db: Session, prestamo: PrestamoCreate, usuario_id: int):
+def crear_prestamo(db: Session, prestamo: PrestamoCreate, usuario_id: int, ip_address: str | None = None):
     cliente = db.query(Cliente).filter(Cliente.id == prestamo.cliente_id, Cliente.estado == "activo").first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado o inactivo")
@@ -135,7 +135,8 @@ def crear_prestamo(db: Session, prestamo: PrestamoCreate, usuario_id: int):
             "monto_total": db_prestamo.monto_total,
             "estado": db_prestamo.estado
         },
-        descripcion=f"Préstamo creado para cliente {cliente.nombre}"
+        descripcion=f"Préstamo creado para cliente {cliente.nombre}",
+        ip_address=ip_address,
     )
     
     return db_prestamo
@@ -183,7 +184,7 @@ def obtener_prestamo(db: Session, prestamo_id: int):
     )
 
 
-def renovar_prestamo(db: Session, prestamo_id: int, renovacion):
+def renovar_prestamo(db: Session, prestamo_id: int, renovacion, usuario_id=None, ip_address: str | None = None):
     prestamo_original = db.query(Prestamo).filter(Prestamo.id == prestamo_id).first()
     if not prestamo_original:
         raise HTTPException(status_code=404, detail="Prestamo no encontrado")
@@ -273,6 +274,23 @@ def renovar_prestamo(db: Session, prestamo_id: int, renovacion):
 
         db.commit()
         db.refresh(nuevo_prestamo)
+
+        from app.services.auditoria import registrar_auditoria
+        registrar_auditoria(
+            db,
+            usuario_id=usuario_id,
+            tabla_afectada="prestamos_renovaciones",
+            tipo_operacion="CREATE",
+            registro_id=renovacion_registro.id,
+            valores_nuevos={
+                "prestamo_anterior_id": prestamo_original.id,
+                "prestamo_nuevo_id": nuevo_prestamo.id,
+                "capital_nuevo": capital_nuevo,
+                "abono": abono,
+            },
+            descripcion=f"Renovación del préstamo #{prestamo_original.id} → nuevo préstamo #{nuevo_prestamo.id}",
+            ip_address=ip_address,
+        )
         return nuevo_prestamo
 
     except HTTPException:
@@ -282,7 +300,7 @@ def renovar_prestamo(db: Session, prestamo_id: int, renovacion):
         raise HTTPException(status_code=500, detail=f"Error al renovar el prestamo: {str(e)}")
 
 
-def marcar_prestamo_perdido(db: Session, prestamo_id: int, datos):
+def marcar_prestamo_perdido(db: Session, prestamo_id: int, datos, usuario_id=None, ip_address: str | None = None):
     prestamo = db.query(Prestamo).filter(Prestamo.id == prestamo_id).first()
     if not prestamo:
         raise HTTPException(status_code=404, detail="Prestamo no encontrado")
@@ -317,6 +335,22 @@ def marcar_prestamo_perdido(db: Session, prestamo_id: int, datos):
 
         db.commit()
         db.refresh(prestamo)
+
+        from app.services.auditoria import registrar_auditoria
+        registrar_auditoria(
+            db,
+            usuario_id=usuario_id,
+            tabla_afectada="prestamos_perdidos",
+            tipo_operacion="CREATE",
+            registro_id=perdido.id,
+            valores_nuevos={
+                "prestamo_id": prestamo.id,
+                "valor_perdido": valor_perdido,
+                "motivo": datos.motivo,
+            },
+            descripcion=f"Préstamo #{prestamo.id} declarado perdido",
+            ip_address=ip_address,
+        )
         return {
             "prestamo": prestamo,
             "valor_perdido": valor_perdido,
@@ -331,7 +365,7 @@ def marcar_prestamo_perdido(db: Session, prestamo_id: int, datos):
         raise HTTPException(status_code=500, detail=f"Error al marcar prestamo como perdido: {str(e)}")
 
 
-def ajustar_capital_prestamo(db: Session, prestamo_id: int, nuevo_capital: float, usuario_id: int):
+def ajustar_capital_prestamo(db: Session, prestamo_id: int, nuevo_capital: float, usuario_id: int, ip_address: str | None = None):
     db_prestamo = db.query(Prestamo).filter(Prestamo.id == prestamo_id).first()
     if not db_prestamo:
         raise HTTPException(status_code=404, detail="Préstamo no encontrado")
@@ -354,11 +388,18 @@ def ajustar_capital_prestamo(db: Session, prestamo_id: int, nuevo_capital: float
     )
     db_prestamo.monto_total = round(nuevo_capital + db_prestamo.interes_total, 2)
     db_prestamo.valor_cuota = round(db_prestamo.monto_total / db_prestamo.numero_cuotas, 2)
-    db_prestamo.saldo_pendiente = db_prestamo.monto_total
+
+    # El saldo pendiente descuenta lo ya efectivamente pagado (RF-034)
+    pagado_no_devuelto = (
+        db.query(func.coalesce(func.sum(Pago.capital_pagado + Pago.interes_pagado), 0.0))
+        .filter(Pago.prestamo_id == prestamo_id, Pago.estado_pago != "devuelto")
+        .scalar()
+    )
+    db_prestamo.saldo_pendiente = max(0.0, round(db_prestamo.monto_total - pagado_no_devuelto, 2))
     
     cuotas = db.query(PrestamoCuota).filter(
         PrestamoCuota.prestamo_id == prestamo_id,
-        PrestamoCuota.estado == "pendiente"
+        PrestamoCuota.estado.in_(["pendiente", "vencido"])
     ).all()
     
     for cuota in cuotas:
@@ -368,11 +409,12 @@ def ajustar_capital_prestamo(db: Session, prestamo_id: int, nuevo_capital: float
         cuota.interes = round(db_prestamo.interes_total / db_prestamo.numero_cuotas, 2)
     
     capital = db.query(Capital).first()
-    capital.monto_total -= diferencia
+    if capital is not None and diferencia != 0:
+        capital.monto_total = round(capital.monto_total - diferencia, 2)
     
     if diferencia != 0:
         movimiento = MovimientoCapital(
-            tipo_movimiento="prestamo_otorgado" if diferencia > 0 else "retiro",
+            tipo_movimiento="ajuste_prestamo",
             descripcion=f"Ajuste de capital en préstamo #{prestamo_id}: ${capital_anterior:,.2f} → ${nuevo_capital:,.2f}",
             valor=abs(diferencia),
             fecha=date.today(),
@@ -398,7 +440,179 @@ def ajustar_capital_prestamo(db: Session, prestamo_id: int, nuevo_capital: float
             "monto_total": db_prestamo.monto_total,
             "valor_cuota": db_prestamo.valor_cuota
         },
-        descripcion=f"Capital ajustado: ${capital_anterior:,.2f} → ${nuevo_capital:,.2f}"
+        descripcion=f"Capital ajustado: ${capital_anterior:,.2f} → ${nuevo_capital:,.2f}",
+        ip_address=ip_address,
     )
     
     return db_prestamo
+
+
+def reestructurar_prestamo(db: Session, prestamo_id: int, datos, usuario_id: int, ip_address: str | None = None):
+    """
+    Renegocia plazo e interés de un préstamo en mora generando un plan de cuotas
+    nuevo vinculado al préstamo original, sin cancelar el histórico (RF-035).
+    """
+    prestamo = db.query(Prestamo).filter(Prestamo.id == prestamo_id).first()
+    if not prestamo:
+        raise HTTPException(status_code=404, detail="Préstamo no encontrado")
+    if prestamo.estado != "activo":
+        raise HTTPException(status_code=400, detail=f"No se puede reestructurar un préstamo en estado {prestamo.estado}")
+
+    hoy = date.today()
+
+    cuotas_vencidas = db.query(PrestamoCuota).filter(
+        PrestamoCuota.prestamo_id == prestamo_id,
+        PrestamoCuota.estado.in_(["vencido", "parcial"]),
+        PrestamoCuota.fecha_vencimiento < hoy,
+    ).count()
+    moras_generadas = db.query(Mora).filter(
+        Mora.prestamo_id == prestamo_id, Mora.estado == "generada"
+    ).count()
+    if cuotas_vencidas == 0 and moras_generadas == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="El préstamo no tiene cuotas vencidas; la reestructuración aplica solo a préstamos en mora",
+        )
+
+    # Una reestructuración múltiple exige cerrar la anterior (RF-035)
+    activa = (
+        db.query(PrestamoReestructuracion)
+        .filter(
+            PrestamoReestructuracion.prestamo_id == prestamo_id,
+            PrestamoReestructuracion.estado == "activa",
+        )
+        .first()
+    )
+    if activa:
+        activa.estado = "cerrada"
+
+    # Absorber del plan a generar todas las cuotas sin pagos (se reemplazan)
+    cuotas_previas = (
+        db.query(PrestamoCuota)
+        .filter(
+            PrestamoCuota.prestamo_id == prestamo_id,
+            PrestamoCuota.estado.in_(["pendiente", "vencido"]),
+        )
+        .all()
+    )
+    ids_con_pago = {
+        fila[0]
+        for fila in db.query(Pago.cuota_id)
+        .filter(Pago.cuota_id.in_([c.id for c in cuotas_previas]))
+        .distinct()
+        .all()
+    } if cuotas_previas else set()
+    ids_eliminar = [c.id for c in cuotas_previas if c.id not in ids_con_pago]
+
+    if ids_eliminar:
+        db.query(Mora).filter(Mora.cuota_id.in_(ids_eliminar)).update(
+            {"estado": "cancelada"}, synchronize_session=False
+        )
+        db.query(PrestamoCuota).filter(PrestamoCuota.id.in_(ids_eliminar)).delete(
+            synchronize_session=False
+        )
+
+    # Cuotas parciales conservadas: su residual sigue exigible y no se refinancia
+    parciales = (
+        db.query(PrestamoCuota)
+        .filter(PrestamoCuota.prestamo_id == prestamo_id, PrestamoCuota.estado == "parcial")
+        .all()
+    )
+    pagado_por_cuota = dict(
+        db.query(Pago.cuota_id, func.coalesce(func.sum(Pago.valor_pagado), 0.0))
+        .filter(
+            Pago.cuota_id.in_([c.id for c in parciales]),
+            Pago.estado_pago != "devuelto",
+        )
+        .group_by(Pago.cuota_id)
+        .all()
+    ) if parciales else {}
+    residuales = round(
+        sum(max(c.valor_cuota - pagado_por_cuota.get(c.id, 0.0), 0.0) for c in parciales), 2
+    )
+
+    saldo_anterior = round(prestamo.saldo_pendiente, 2)
+    base = round(max(saldo_anterior - residuales, 0.0), 2)
+    if base <= 0:
+        raise HTTPException(status_code=400, detail="No hay saldo pendiente para reestructurar")
+
+    interes_nuevo = round(base * (datos.porcentaje_interes / 100) * datos.numero_cuotas, 2)
+    plan_total = round(base + interes_nuevo, 2)
+
+    pagado_total = round(prestamo.monto_total - saldo_anterior, 2)
+    prestamo.interes_total = round(prestamo.interes_total + interes_nuevo, 2)
+    prestamo.saldo_pendiente = round(residuales + plan_total, 2)
+    prestamo.monto_total = round(pagado_total + prestamo.saldo_pendiente, 2)
+    prestamo.porcentaje_interes = datos.porcentaje_interes
+    prestamo.valor_cuota = round(plan_total / datos.numero_cuotas, 2)
+
+    reestructuracion = PrestamoReestructuracion(
+        prestamo_id=prestamo_id,
+        fecha=hoy,
+        motivo=datos.motivo,
+        saldo_anterior=saldo_anterior,
+        numero_cuotas=datos.numero_cuotas,
+        porcentaje_interes=datos.porcentaje_interes,
+        valor_cuota=prestamo.valor_cuota,
+        monto_plan=plan_total,
+        estado="activa",
+    )
+    db.add(reestructuracion)
+    db.flush()
+
+    max_numero = (
+        db.query(func.max(PrestamoCuota.numero_cuota))
+        .filter(PrestamoCuota.prestamo_id == prestamo_id)
+        .scalar()
+        or 0
+    )
+
+    capital_regular = round(base / datos.numero_cuotas, 2)
+    interes_regular = round(interes_nuevo / datos.numero_cuotas, 2)
+    for i in range(datos.numero_cuotas):
+        if i == datos.numero_cuotas - 1:
+            val_capital = round(base - capital_regular * (i), 2)
+            val_interes = round(interes_nuevo - interes_regular * (i), 2)
+        else:
+            val_capital = capital_regular
+            val_interes = interes_regular
+        numero = max_numero + i + 1
+        db.add(PrestamoCuota(
+            prestamo_id=prestamo_id,
+            numero_cuota=numero,
+            fecha_vencimiento=datos.fecha_inicio + relativedelta(months=i),
+            valor_cuota=round(val_capital + val_interes, 2),
+            monto_interes=val_interes,
+            capital=val_capital,
+            interes=val_interes,
+            mora=0.0,
+            estado="pendiente",
+            referencia_pago=generar_referencia_unica_cuota(prestamo_id, numero),
+            reestructuracion_id=reestructuracion.id,
+        ))
+
+    db.commit()
+    db.refresh(reestructuracion)
+
+    from app.services.auditoria import registrar_auditoria
+    registrar_auditoria(
+        db,
+        usuario_id=usuario_id,
+        tabla_afectada="prestamos_reestructuraciones",
+        tipo_operacion="CREATE",
+        registro_id=reestructuracion.id,
+        valores_nuevos={
+            "prestamo_id": prestamo_id,
+            "saldo_anterior": saldo_anterior,
+            "numero_cuotas": datos.numero_cuotas,
+            "porcentaje_interes": datos.porcentaje_interes,
+            "monto_plan": plan_total,
+        },
+        descripcion=(
+            f"Reestructuración del préstamo #{prestamo_id}: {datos.numero_cuotas} cuotas al "
+            f"{datos.porcentaje_interes}% — motivo: {datos.motivo}"
+        ),
+        ip_address=ip_address,
+    )
+
+    return reestructuracion
