@@ -1,9 +1,12 @@
 from sqlalchemy.orm import Session
 from app.models.models import TipoPrestamo
 from app.schemas.tipo_prestamo import TipoPrestamoCreate, TipoPrestamoUpdate
+from app.utils.pagination import paginate
 
-def get_tipo_prestamos(db: Session, skip: int = 0, limit: int = 10):
-    return db.query(TipoPrestamo).filter(TipoPrestamo.estado == "activo").offset(skip).limit(limit).all()
+def get_tipo_prestamos(db: Session, page: int = 1, limit: int = 10):
+    query = db.query(TipoPrestamo).filter(TipoPrestamo.estado == "activo")
+    query = query.order_by(TipoPrestamo.id.asc())
+    return paginate(query, page=page, limit=limit)
 
 def get_tipo_prestamo(db: Session, tipo_prestamo_id: int):
     return db.query(TipoPrestamo).filter(TipoPrestamo.id == tipo_prestamo_id).first()

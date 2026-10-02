@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.db.database import SessionLocal
+from app.schemas.pagination import PaginatedResponse
 import app.services.tipo_pago as services
 import app.schemas.tipo_pago as schemas
 from app.dependencies.auth import get_current_user, require_rol
@@ -18,9 +19,14 @@ def get_db():
 def crear_tipo_pago(tipo_pago: schemas.TipoPagoCreate, db: Session = Depends(get_db), current_user: dict = Depends(require_rol("admin"))):
     return services.create_tipo_pago(db, tipo_pago)
 
-@router.get("/", response_model=list[schemas.TipoPagoOut])
-def listar_tipo_pagos(skip: int = 0, limit: int = 10, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    return services.get_tipo_pagos(db, skip, limit)
+@router.get("/", response_model=PaginatedResponse[schemas.TipoPagoOut])
+def listar_tipo_pagos(
+    page: int = Query(1, ge=1, description="Número de página"),
+    limit: int = Query(10, ge=1, le=100, description="Elementos por página"),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    return services.get_tipo_pagos(db, page=page, limit=limit)
 
 @router.get("/{tipo_pago_id}", response_model=schemas.TipoPagoOut)
 def obtener_tipo_pago(tipo_pago_id: int, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):

@@ -1,9 +1,12 @@
 from sqlalchemy.orm import Session
 from app.models.models import TipoPago
 from app.schemas.tipo_pago import TipoPagoCreate, TipoPagoUpdate
+from app.utils.pagination import paginate
 
-def get_tipo_pagos(db: Session, skip: int = 0, limit: int = 10):
-    return db.query(TipoPago).filter(TipoPago.estado == "activo").offset(skip).limit(limit).all()
+def get_tipo_pagos(db: Session, page: int = 1, limit: int = 10):
+    query = db.query(TipoPago).filter(TipoPago.estado == "activo")
+    query = query.order_by(TipoPago.id.asc())
+    return paginate(query, page=page, limit=limit)
 
 def get_tipo_pago(db: Session, tipo_pago_id: int):
     return db.query(TipoPago).filter(TipoPago.id == tipo_pago_id).first()

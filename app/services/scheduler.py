@@ -80,6 +80,17 @@ def ejecutar_tareas_diarias():
         db.close()
 
 
+def ejecutar_respaldo_diario():
+    """RF-075: respaldo automático diario con retención aplicada."""
+    try:
+        from app.services.backup import crear_respaldo
+
+        destino = crear_respaldo()
+        print(f"[{datetime.now()}] Respaldo diario creado: {destino}")
+    except Exception as e:
+        print(f"[{datetime.now()}] Error en el respaldo diario: {e}")
+
+
 def iniciar_scheduler():
     scheduler.add_job(
         ejecutar_tareas_diarias,
@@ -87,6 +98,15 @@ def iniciar_scheduler():
         hour=0,
         minute=0,
         id="tarea_diaria_sistema",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+    scheduler.add_job(
+        ejecutar_respaldo_diario,
+        trigger="cron",
+        hour=0,
+        minute=30,
+        id="respaldo_diario_bd",
         replace_existing=True,
         misfire_grace_time=3600,
     )

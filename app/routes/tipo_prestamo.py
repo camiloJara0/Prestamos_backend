@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.db.database import SessionLocal
+from app.schemas.pagination import PaginatedResponse
 import app.services.tipo_prestamo as services
 import app.schemas.tipo_prestamo as schemas
 from app.dependencies.auth import get_current_user, require_rol
@@ -18,9 +19,14 @@ def get_db():
 def crear_tipo_prestamo(tipo_prestamo: schemas.TipoPrestamoCreate, db: Session = Depends(get_db), current_user: dict = Depends(require_rol("admin"))):
     return services.create_tipo_prestamo(db, tipo_prestamo)
 
-@router.get("/", response_model=list[schemas.TipoPrestamoOut])
-def listar_tipo_prestamos(skip: int = 0, limit: int = 10, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    return services.get_tipo_prestamos(db, skip, limit)
+@router.get("/", response_model=PaginatedResponse[schemas.TipoPrestamoOut])
+def listar_tipo_prestamos(
+    page: int = Query(1, ge=1, description="Número de página"),
+    limit: int = Query(10, ge=1, le=100, description="Elementos por página"),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    return services.get_tipo_prestamos(db, page=page, limit=limit)
 
 @router.get("/{tipo_prestamo_id}", response_model=schemas.TipoPrestamoOut)
 def obtener_tipo_prestamo(tipo_prestamo_id: int, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):

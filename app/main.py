@@ -1,7 +1,7 @@
 import os
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from app.db.database import init_db
 from app.services.scheduler import iniciar_scheduler, scheduler
@@ -37,7 +37,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan, title="Sistema de Préstamos")
 
-# Lista de orígenes permitidos para CORS
+# Lista de orígenes permitidos para CORS: el origen real del frontend más los
+# orígenes de desarrollo local. RF-074: sin comodín "*" en el entorno productivo.
 allowed_origins = [
     "http://localhost:3001",
     "http://localhost:3000",
@@ -55,6 +56,63 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# RF-074 · Cabeceras de seguridad y política de contenidos.
+CABECERAS_SEGURIDAD = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Resource-Policy": "same-origin",
+}
+
+# Política estricta para las respuestas de la API (JSON/ archivos).
+CSP_API = (
+    "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; "
+    "form-action 'self'; report-uri /csp-report"
+)
+
+# Swagger UI carga sus recursos desde CDN en el navegador.
+CSP_DOCS = (
+    "default-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "img-src 'self' data: https:; "
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "frame-ancestors 'none'; report-uri /csp-report"
+)
+
+RUTAS_DOCUMENTACION = ("/docs", "/redoc", "/openapi.json")
+
+
+@app.middleware("http")
+async def cabeceras_seguridad(request, call_next):
+    respuesta = await call_next(request)
+
+    # Las respuestas con datos sensibles no se almacenan en caché.
+    respuesta.headers["Cache-Control"] = "no-store"
+
+    for cabecera, valor in CABECERAS_SEGURIDAD.items():
+        respuesta.headers[cabecera] = valor
+
+    if request.url.path.startswith(RUTAS_DOCUMENTACION):
+        respuesta.headers["Content-Security-Policy"] = CSP_DOCS
+    else:
+        respuesta.headers["Content-Security-Policy"] = CSP_API
+
+    return respuesta
+
+
+@app.post("/csp-report", status_code=204, include_in_schema=False)
+async def recibir_reporte_csp(request: Request):
+    """RF-074: registra las violaciones de la política de contenidos."""
+    try:
+        reporte = await request.json()
+    except Exception:
+        reporte = {}
+    print(f"[CSP] Violacion reportada: {reporte}")
+    return Response(status_code=204)
 
 
 @app.get("/")
