@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import extract
+from sqlalchemy import extract, func
 from typing import Optional
 from app.models.models import MovimientoCapital, Prestamo, PrestamoPerdido, Pago, PrestamoCuota, Cliente
 from datetime import date, timedelta
@@ -131,6 +131,15 @@ def get_reporte_cobranza(db: Session, desde: Optional[date] = None, hasta: Optio
         cuotas_vencidas = [c for c in cuotas_vencidas if c.fecha_vencimiento <= hasta]
         cuotas_pagadas = [c for c in cuotas_pagadas if c.fecha_vencimiento <= hasta]
     
+    # Monto pagado sobre cada cuota vencida para conocer su saldo real (RF-047)
+    ids_vencidas = [c.id for c in cuotas_vencidas]
+    pagado_por_cuota = dict(
+        db.query(Pago.cuota_id, func.coalesce(func.sum(Pago.capital_pagado + Pago.interes_pagado), 0.0))
+        .filter(Pago.cuota_id.in_(ids_vencidas))
+        .group_by(Pago.cuota_id)
+        .all()
+    ) if ids_vencidas else {}
+
     return {
         "periodo": _label_periodo(desde, hasta),
         "total_cuotas_por_vencer": len(cuotas_por_vencer),
@@ -160,7 +169,9 @@ def get_reporte_cobranza(db: Session, desde: Optional[date] = None, hasta: Optio
                 "fecha_vencimiento": str(c.fecha_vencimiento),
                 "valor_cuota": c.valor_cuota,
                 "estado": c.estado,
-                "dias_atraso": (today - c.fecha_vencimiento).days
+                "dias_atraso": (today - c.fecha_vencimiento).days,
+                "mora": float(c.mora or 0.0),
+                "saldo": max(float(c.valor_cuota) - float(pagado_por_cuota.get(c.id, 0.0)), 0.0)
             } for c in cuotas_vencidas
         ],
         "cuotas_pagadas": [

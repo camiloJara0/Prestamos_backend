@@ -1,10 +1,11 @@
+from datetime import date
 from pydantic import BaseModel
 from typing import Optional
 
 class MoraBase(BaseModel):
     prestamo_id: int
     cuota_id: int
-    fecha: str
+    fecha: date
     valor: float
     estado: str
 

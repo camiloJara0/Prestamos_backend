@@ -3,8 +3,8 @@ from datetime import date, datetime, timezone, timedelta
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
-from app.models.models import Pago, PrestamoCuota, Prestamo, MovimientoCapital, TipoPago, Capital
-from app.schemas.pago import PagoCreate, PagoDevolucionCreate
+from app.models.models import Pago, PrestamoCuota, Prestamo, MovimientoCapital, TipoPago, Capital, Cliente
+from app.schemas.pago import PagoCreate, PagoDevolucionCreate, PagoOut
 from app.utils.pagination import paginate
 
 
@@ -224,6 +224,48 @@ def devolver_pago(db: Session, pago_id: int, datos_devolucion: PagoDevolucionCre
     return db_pago
 
 
-def get_pagos(db: Session, page: int = 1, limit: int = 10):
-    query = db.query(Pago).order_by(Pago.id.desc())
-    return paginate(query, page=page, limit=limit)
+def get_pagos(
+    db: Session,
+    page: int = 1,
+    limit: int = 10,
+    cliente_id: int | None = None,
+    tipo_pago_id: int | None = None,
+    fecha_desde: date | None = None,
+    fecha_hasta: date | None = None,
+):
+    """Historial global de pagos con filtros por cliente, fecha y tipo (RF-041)."""
+    from sqlalchemy import func
+
+    query = db.query(Pago)
+    if cliente_id is not None:
+        query = query.filter(Pago.cliente_id == cliente_id)
+    if tipo_pago_id is not None:
+        query = query.filter(Pago.tipo_pago_id == tipo_pago_id)
+    if fecha_desde is not None:
+        query = query.filter(func.date(Pago.fecha_pago) >= fecha_desde)
+    if fecha_hasta is not None:
+        query = query.filter(func.date(Pago.fecha_pago) <= fecha_hasta)
+    query = query.order_by(Pago.fecha_pago.desc(), Pago.id.desc())
+
+    resultado = paginate(query, page=page, limit=limit)
+
+    pagos = resultado["items"]
+    if pagos:
+        cliente_ids = {p.cliente_id for p in pagos}
+        tipo_ids = {p.tipo_pago_id for p in pagos}
+        nombres_cliente = dict(
+            db.query(Cliente.id, Cliente.nombre).filter(Cliente.id.in_(cliente_ids)).all()
+        )
+        nombres_tipo = dict(
+            db.query(TipoPago.id, TipoPago.nombre).filter(TipoPago.id.in_(tipo_ids)).all()
+        )
+        resultado["items"] = [
+            {
+                **PagoOut.model_validate(p).model_dump(),
+                "cliente_nombre": nombres_cliente.get(p.cliente_id),
+                "tipo_pago_nombre": nombres_tipo.get(p.tipo_pago_id),
+            }
+            for p in pagos
+        ]
+
+    return resultado

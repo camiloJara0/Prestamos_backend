@@ -38,7 +38,13 @@ def get_moras(db: Session, page: int = 1, limit: int = 10):
     }
 
 def get_moras_prestamo(db: Session, prestamo_id: int):
-    return db.query(Mora).filter(Mora.prestamo_id == prestamo_id).order_by(Mora.fecha.desc()).all()
+    """Moras en estado generada de un préstamo, más recientes primero (RF-045)."""
+    return (
+        db.query(Mora)
+        .filter(Mora.prestamo_id == prestamo_id, Mora.estado == "generada")
+        .order_by(Mora.fecha.desc())
+        .all()
+    )
 
 def get_mora(db: Session, mora_id: int):
     return db.query(Mora).filter(Mora.id == mora_id).first()

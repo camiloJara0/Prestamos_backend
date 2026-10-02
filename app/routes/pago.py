@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
@@ -6,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.db.database import SessionLocal
 from app.dependencies.auth import get_current_user
 from app.models import IdempotencyKey, PrestamoCuota, Prestamo, Cliente, Pago, Usuario
-from app.schemas.pago import PagoCreate, PagoOut, PagoDevolucionCreate
+from app.schemas.pago import PagoCreate, PagoOut, PagoDevolucionCreate, PagoHistorialOut
 from app.schemas.pagination import PaginatedResponse
 from app.services.pago import get_pagos, registrar_pago, devolver_pago
 from app.utils.pdf_generator import generar_recibo_pdf_bytes
@@ -79,14 +80,27 @@ def crear_pago(
     return nuevo_pago
 
 
-@router.get("/", response_model=PaginatedResponse[PagoOut])
+@router.get("/", response_model=PaginatedResponse[PagoHistorialOut])
 def listar_pagos(
     page: int = Query(1, ge=1, description="Número de página"),
     limit: int = Query(10, ge=1, le=100, description="Elementos por página"),
+    cliente_id: int | None = Query(None, description="Filtrar pagos por cliente"),
+    tipo_pago_id: int | None = Query(None, description="Filtrar pagos por tipo de pago"),
+    fecha_desde: date | None = Query(None, description="Fecha inicial (inclusive)"),
+    fecha_hasta: date | None = Query(None, description="Fecha final (inclusive)"),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    return get_pagos(db, page=page, limit=limit)
+    """Historial global de pagos con filtros por cliente, fecha y tipo (RF-041)."""
+    return get_pagos(
+        db,
+        page=page,
+        limit=limit,
+        cliente_id=cliente_id,
+        tipo_pago_id=tipo_pago_id,
+        fecha_desde=fecha_desde,
+        fecha_hasta=fecha_hasta,
+    )
 
 
 @router.get("/{pago_id}", response_model=PagoOut)

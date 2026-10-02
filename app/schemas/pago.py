@@ -45,3 +45,9 @@ class PagoOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class PagoHistorialOut(PagoOut):
+    """Item del historial global de pagos con nombres resueltos (RF-041)."""
+    cliente_nombre: Optional[str] = None
+    tipo_pago_nombre: Optional[str] = None

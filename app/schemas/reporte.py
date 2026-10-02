@@ -25,6 +25,9 @@ class CuotaCobranzaOut(BaseModel):
     valor_cuota: float
     estado: str
     dias_atraso: int
+    # Campos de gestión de cobranza (RF-047)
+    mora: float = 0.0
+    saldo: float = 0.0
 
 class ReporteCobranzaOut(BaseModel):
     total_cuotas_por_vencer: int

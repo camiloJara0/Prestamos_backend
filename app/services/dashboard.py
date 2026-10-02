@@ -1,3 +1,5 @@
+from datetime import date
+
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -67,6 +69,36 @@ def obtener_resumen_dashboard(db: Session) -> dict:
             else 0.0
         )
 
+    # 7. Indicadores de cobranza y mora (RF-058)
+    hoy = date.today()
+
+    # Monto vencido: cuotas vencidas o parciales cuyo vencimiento ya pasó
+    monto_vencido = (
+        db.query(func.coalesce(func.sum(PrestamoCuota.valor_cuota), 0.0))
+        .filter(
+            PrestamoCuota.estado.in_(["vencido", "parcial"]),
+            PrestamoCuota.fecha_vencimiento < hoy,
+        )
+        .scalar()
+    )
+
+    # Mora pendiente: moras en estado generada aún no saldadas
+    mora_pendiente = (
+        db.query(func.coalesce(func.sum(Mora.valor), 0.0))
+        .filter(Mora.estado == "generada")
+        .scalar()
+    )
+
+    # Cobro del día: pagos registrados hoy, sin contar devoluciones
+    cobro_del_dia = (
+        db.query(func.coalesce(func.sum(Pago.valor_pagado), 0.0))
+        .filter(
+            func.date(Pago.fecha_pago) == hoy,
+            Pago.estado_pago != "devuelto",
+        )
+        .scalar()
+    )
+
     return {
         "capital_actual": float(capital_actual),
         "prestamos_activos": prestamos_activos,
@@ -75,4 +107,7 @@ def obtener_resumen_dashboard(db: Session) -> dict:
         "total_prestado_periodo": float(total_prestado_periodo),
         "mora_acumulada": float(mora_acumulada),
         "prestamos_por_estado": prestamos_por_estado,
+        "monto_vencido": float(monto_vencido),
+        "mora_pendiente": float(mora_pendiente),
+        "cobro_del_dia": float(cobro_del_dia),
     }

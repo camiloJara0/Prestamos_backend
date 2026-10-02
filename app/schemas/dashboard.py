@@ -16,3 +16,8 @@ class DashboardResumenOut(BaseModel):
     total_prestado_periodo: float
     mora_acumulada: float
     prestamos_por_estado: PrestamosPorEstado
+
+    # Indicadores de cobranza y mora (RF-058)
+    monto_vencido: float = 0.0
+    mora_pendiente: float = 0.0
+    cobro_del_dia: float = 0.0

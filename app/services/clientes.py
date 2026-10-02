@@ -15,7 +15,8 @@ def get_clientes(db: Session, page: int = 1, limit: int = 10, busqueda: str | No
         query = query.filter(
             or_(
                 Cliente.nombre.ilike(termino),
-                Cliente.cedula.ilike(termino)
+                Cliente.cedula.ilike(termino),
+                Cliente.telefono.ilike(termino)
             )
         )
         

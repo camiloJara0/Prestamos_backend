@@ -28,7 +28,7 @@ def crear_cliente(
 def listar_clientes(
     page: int = Query(1, ge=1, description="Número de página"),
     limit: int = Query(10, ge=1, le=100, description="Elementos por página"),
-    busqueda: str | None = Query(None, alias="q", description="Buscar por nombre o cédula"),
+    busqueda: str | None = Query(None, alias="q", description="Buscar por nombre, cédula o teléfono"),
     db: Session = Depends(get_db), 
     current_user: dict = Depends(get_current_user)
 ):
