@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, status, HTTPException
 from sqlalchemy.orm import Session
 
@@ -66,7 +68,31 @@ def change_password(
         password_actual=req.password_actual, 
         password_nuevo=req.password_nuevo
     )
+    _notificar_cambio_password(db, usuario_id)
     return {"message": "Contraseña cambiada exitosamente."}
+
+
+def _notificar_cambio_password(db, usuario_id):
+    """RF-061: aviso por correo del cambio de contraseña; un fallo no revierte la operación."""
+    try:
+        from app.models.models import Usuario
+        from app.services.canales import enviar_por_canal
+
+        usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
+        if not usuario:
+            return
+        enviar_por_canal(
+            db,
+            canal="email",
+            destinatario=usuario.email,
+            clave="password_cambiada",
+            contexto={
+                "nombre": usuario.nombre,
+                "fecha": datetime.now().strftime("%d/%m/%Y %H:%M"),
+            },
+        )
+    except Exception:  # noqa: BLE001 - el fallo de correo no revierte el cambio
+        pass
 
 
 @router.post("/forgot-password", response_model=MessageResponse)

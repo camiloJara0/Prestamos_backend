@@ -98,6 +98,18 @@ def seed():
                 "descripcion": "Días de gracia antes de aplicar mora",
                 "tipo_valor": "int"
             },
+            {
+                "clave": "dias_expiracion_solicitud",
+                "valor": "7",
+                "descripcion": "Días que una solicitud aprobada espera antes de expirar (RF-021)",
+                "tipo_valor": "int"
+            },
+            {
+                "clave": "firma_contrato_requerida",
+                "valor": "false",
+                "descripcion": "Exigir contrato firmado antes de convertir solicitud en préstamo (RF-066)",
+                "tipo_valor": "bool"
+            },
         ]
         for cfg in configs:
             if not db.query(ConfiguracionSistema).filter(ConfiguracionSistema.clave == cfg["clave"]).first():
@@ -105,6 +117,22 @@ def seed():
                 print(f"Configuración '{cfg['clave']}' creada")
             else:
                 print(f"- Configuración '{cfg['clave']}' ya existe")
+
+        db.commit()
+
+        # 6. Plantillas de mensajes (RF-063)
+        from app.models.models import PlantillaMensaje
+        from app.services.plantillas import PLANTILLAS_POR_DEFECTO
+
+        for plantilla in PLANTILLAS_POR_DEFECTO:
+            existente = (
+                db.query(PlantillaMensaje)
+                .filter(PlantillaMensaje.clave == plantilla["clave"])
+                .first()
+            )
+            if not existente:
+                db.add(PlantillaMensaje(**plantilla))
+                print(f"Plantilla '{plantilla['clave']}' creada")
 
         db.commit()
 

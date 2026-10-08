@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 
 # --- ESQUEMAS EXISTENTES (PUSH NOTIFICATIONS) ---
@@ -17,6 +17,26 @@ class PushSubscriptionOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# --- BANDEJA DE NOTIFICACIONES INTERNAS (RF-023) ---
+
+class NotificacionOut(BaseModel):
+    id: int
+    titulo: str
+    mensaje: str
+    url: Optional[str] = None
+    tipo: str
+    leida: bool
+    push_enviado: bool
+    fecha: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class NotificacionCountOut(BaseModel):
+    no_leidas: int
 
 
 class PushNotificationPayload(BaseModel):

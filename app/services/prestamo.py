@@ -138,8 +138,35 @@ def crear_prestamo(db: Session, prestamo: PrestamoCreate, usuario_id: int, ip_ad
         descripcion=f"Préstamo creado para cliente {cliente.nombre}",
         ip_address=ip_address,
     )
-    
+
+    _correo_prestamo_creado(db, db_prestamo, cliente, usuario_id)
+
     return db_prestamo
+
+
+def _correo_prestamo_creado(db: Session, prestamo, cliente, usuario_id: int) -> None:
+    """RF-061: aviso por correo de la creación del préstamo; un fallo no revierte la operación."""
+    try:
+        from app.models.models import Usuario
+        from app.services.canales import enviar_por_canal
+
+        usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
+        if not usuario:
+            return
+        enviar_por_canal(
+            db,
+            canal="email",
+            destinatario=usuario.email,
+            clave="prestamo_creado",
+            contexto={
+                "nombre": cliente.nombre.split()[0] if cliente.nombre else "cliente",
+                "prestamo_id": prestamo.id,
+                "monto": f"{prestamo.capital_prestado:,.0f}",
+                "numero_cuotas": prestamo.numero_cuotas,
+            },
+        )
+    except Exception:  # noqa: BLE001 - el fallo de correo no revierte la creación
+        pass
 
 
 def get_prestamos(

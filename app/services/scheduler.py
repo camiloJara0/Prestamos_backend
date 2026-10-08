@@ -53,8 +53,57 @@ def enviar_recordatorios_vencimiento(db):
                     url=f"/prestamos/{cuota.prestamo_id}" if prestamo else "/",
                 )
                 total_enviados += res.get("enviados", 0)
+                _correo_recordatorio(db, admin, cuota, prestamo, cliente, texto_tiempo)
+
+            # RF-062: aviso por SMS al cliente registrado
+            if cliente and cliente.telefono:
+                _sms_recordatorio(db, cliente, cuota, texto_tiempo)
 
     return total_enviados
+
+
+def _correo_recordatorio(db, admin, cuota, prestamo, cliente, texto_tiempo):
+    """RF-061: recordatorio de pago por correo al usuario responsable."""
+    try:
+        from app.services.canales import enviar_por_canal
+
+        enviar_por_canal(
+            db,
+            canal="email",
+            destinatario=admin.email,
+            clave="recordatorio_vencimiento_email",
+            contexto={
+                "nombre": (cliente.nombre.split()[0] if cliente and cliente.nombre else "cliente"),
+                "numero_cuota": cuota.numero_cuota,
+                "monto": f"{cuota.valor_cuota:,.0f}",
+                "fecha": f"{cuota.fecha_vencimiento} ({texto_tiempo})",
+                "referencia": cuota.referencia_pago or f"REF-P{cuota.prestamo_id}C{cuota.numero_cuota}",
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 - el fallo de correo no revierte la tarea
+        print(f"[SCHEDULER] Error en correo de recordatorio: {exc}")
+
+
+def _sms_recordatorio(db, cliente, cuota, texto_tiempo):
+    """RF-062: aviso por texto al cliente; sin proveedor se omite y queda registrado."""
+    try:
+        from app.services.canales import enviar_por_canal
+
+        enviar_por_canal(
+            db,
+            canal="sms",
+            destinatario=cliente.telefono,
+            clave="recordatorio_vencimiento",
+            contexto={
+                "nombre": cliente.nombre.split()[0] if cliente.nombre else "cliente",
+                "numero_cuota": cuota.numero_cuota,
+                "monto": f"{cuota.valor_cuota:,.0f}",
+                "fecha": f"{cuota.fecha_vencimiento} ({texto_tiempo})",
+                "referencia": cuota.referencia_pago or f"REF-P{cuota.prestamo_id}C{cuota.numero_cuota}",
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[SCHEDULER] Error en SMS de recordatorio: {exc}")
 
 
 def ejecutar_tareas_diarias():

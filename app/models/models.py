@@ -392,5 +392,158 @@ class PushSubscription(Base):
     usuario = relationship("Usuario", back_populates="push_subscriptions")
 
 
+class SolicitudPrestamo(Base):
+    """Solicitud de préstamo (RF-020 a RF-022, RF-065)."""
+    __tablename__ = "solicitudes_prestamo"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cliente_id = Column(Integer, ForeignKey("clientes.id"), nullable=False)
+    tipo_prestamo_id = Column(Integer, ForeignKey("tipos_prestamo.id"), nullable=False)
+
+    monto_solicitado = Column(Float, nullable=False)
+    plazo_cuotas = Column(Integer, nullable=False)
+    porcentaje_interes = Column(Float, nullable=False)
+    motivo = Column(Text, nullable=False)
+
+    estado = Column(
+        Enum(
+            "pendiente",
+            "aprobada",
+            "rechazada",
+            "convertida",
+            "expirada",
+            name="estado_solicitud",
+        ),
+        default="pendiente",
+        nullable=False,
+    )
+
+    usuario_creador_id = Column(Integer, ForeignKey("usuarios.id"))
+    evaluador_id = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
+    fecha_decision = Column(DateTime, nullable=True)
+    motivo_decision = Column(Text, nullable=True)
+    fecha_expiracion = Column(Date, nullable=True)
+
+    prestamo_id = Column(Integer, ForeignKey("prestamos.id"), nullable=True)
+
+    puntaje_scoring = Column(Float, nullable=True)
+    scoring_detalle = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    cliente = relationship("Cliente")
+    tipo_prestamo = relationship("TipoPrestamo")
+    prestamo = relationship("Prestamo")
+    creador = relationship("Usuario", foreign_keys=[usuario_creador_id])
+    evaluador = relationship("Usuario", foreign_keys=[evaluador_id])
+
+
+class Notificacion(Base):
+    """Registro interno de notificaciones (RF-023)."""
+    __tablename__ = "notificaciones"
+
+    id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
+    titulo = Column(String(150), nullable=False)
+    mensaje = Column(Text, nullable=False)
+    url = Column(String(255), nullable=True)
+    tipo = Column(String(50), default="solicitud")
+    leida = Column(Boolean, default=False)
+    push_enviado = Column(Boolean, default=False)
+    fecha = Column(DateTime, default=datetime.utcnow)
+
+    usuario = relationship("Usuario")
+
+
+class PlantillaMensaje(Base):
+    """Plantillas de mensajes por canal (RF-063)."""
+    __tablename__ = "plantillas_mensaje"
+
+    id = Column(Integer, primary_key=True, index=True)
+    clave = Column(String(80), unique=True, nullable=False)
+    canal = Column(
+        Enum("email", "sms", "whatsapp", name="canal_plantilla"),
+        nullable=False,
+    )
+    nombre = Column(String(120), nullable=False)
+    asunto = Column(String(200), nullable=True)
+    cuerpo = Column(Text, nullable=False)
+    activa = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Contrato(Base):
+    """Contrato electrónico generado y firmado (RF-066)."""
+    __tablename__ = "contratos"
+
+    id = Column(Integer, primary_key=True, index=True)
+    solicitud_id = Column(Integer, ForeignKey("solicitudes_prestamo.id"), nullable=True)
+    prestamo_id = Column(Integer, ForeignKey("prestamos.id"), nullable=True)
+    estado = Column(
+        Enum("emitido", "en_firma", "firmado", "rechazado", name="estado_contrato"),
+        default="emitido",
+        nullable=False,
+    )
+    ruta_archivo = Column(String(255), nullable=False)
+    hash_documento = Column(String(64), nullable=False)
+    firmante_nombre = Column(String(120), nullable=True)
+    firmante_documento = Column(String(30), nullable=True)
+    fecha_emision = Column(DateTime, default=datetime.utcnow)
+    fecha_firma = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    solicitud = relationship("SolicitudPrestamo")
+    prestamo = relationship("Prestamo")
+
+
+class TransaccionPasarela(Base):
+    """Transacción de pago en línea vía pasarela (RF-064)."""
+    __tablename__ = "transacciones_pasarela"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cuota_id = Column(Integer, ForeignKey("prestamo_cuotas.id"), nullable=False)
+    monto = Column(Float, nullable=False)
+    pasarela = Column(String(50), default="piloto")
+    estado = Column(
+        Enum("pendiente", "confirmada", "fallida", "expirada", name="estado_pasarela"),
+        default="pendiente",
+        nullable=False,
+    )
+    referencia_externa = Column(String(100), nullable=True)
+    url_pago = Column(String(255), nullable=True)
+    motivo_falla = Column(String(255), nullable=True)
+    pago_id = Column(Integer, ForeignKey("pagos.id"), nullable=True)
+    creado_por = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
+    fecha_creacion = Column(DateTime, default=datetime.utcnow)
+    fecha_confirmacion = Column(DateTime, nullable=True)
+
+    cuota = relationship("PrestamoCuota")
+    pago = relationship("Pago")
+
+
+class EnvioMensaje(Base):
+    """Registro de envíos y omisiones por canal (RF-061, RF-062)."""
+    __tablename__ = "envios_mensaje"
+
+    id = Column(Integer, primary_key=True, index=True)
+    canal = Column(Enum("email", "sms", "whatsapp", name="canal_envio"), nullable=False)
+    destinatario = Column(String(120), nullable=False)
+    asunto = Column(String(200), nullable=True)
+    cuerpo = Column(Text, nullable=True)
+    plantilla_id = Column(Integer, ForeignKey("plantillas_mensaje.id"), nullable=True)
+    estado = Column(
+        Enum("enviado", "omitido", "fallido", name="estado_envio"),
+        default="enviado",
+        nullable=False,
+    )
+    motivo = Column(String(255), nullable=True)
+    fecha = Column(DateTime, default=datetime.utcnow)
+
+    plantilla = relationship("PlantillaMensaje")
+
+
 # Validar relaciones de SQLAlchemy
 configure_mappers()

@@ -17,9 +17,12 @@ from app.routes import (
     mora,
     notificacion,
     pago,
+    pasarela,
+    plantilla,
     prestamo,
     push,
     reporte,
+    solicitudes,
     tipo_pago,
     tipo_prestamo,
     usuarios,
@@ -138,4 +141,8 @@ app.include_router(push.router)
 app.include_router(dashboard.router)
 app.include_router(configuracion.router)
 app.include_router(conciliacion.router)
-app.include_router(metodos_pago.router)  
+app.include_router(metodos_pago.router)
+app.include_router(solicitudes.router)
+app.include_router(solicitudes.router_contratos)
+app.include_router(plantilla.router)
+app.include_router(pasarela.router)

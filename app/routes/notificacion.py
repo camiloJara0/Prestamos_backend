@@ -6,11 +6,14 @@ from typing import List
 
 from app.db.database import SessionLocal
 from app.schemas.notificacion import (
-    PushSubscriptionCreate, 
-    PushSubscriptionOut, 
-    RecordatorioCuotaResponse
+    NotificacionCountOut,
+    NotificacionOut,
+    PushSubscriptionCreate,
+    PushSubscriptionOut,
+    RecordatorioCuotaResponse,
 )
-from app.dependencies.auth import get_current_user
+from app.schemas.pagination import PaginatedResponse
+from app.dependencies.auth import get_current_user, get_usuario_id
 from app.services import notificacion as notificacion_service
 from app.models.models import PrestamoCuota, Prestamo, Cliente, MetodoPagoPrestamista
 
@@ -48,6 +51,40 @@ def desuscribir_push(
     """Elimina la suscripción Push especificada por su endpoint."""
     notificacion_service.eliminar_suscripcion(db=db, endpoint=subscription.endpoint)
     return {"message": "Suscripción eliminada correctamente."}
+
+
+@router.get("/", response_model=PaginatedResponse[NotificacionOut])
+def bandeja_notificaciones(
+    page: int = 1,
+    limit: int = 20,
+    solo_no_leidas: bool = False,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """RF-023: registro interno de notificaciones del usuario autenticado."""
+    usuario_id = get_usuario_id(current_user)
+    return notificacion_service.get_notificaciones(
+        db, usuario_id=usuario_id, page=page, limit=limit, solo_no_leidas=solo_no_leidas
+    )
+
+
+@router.get("/no-leidas", response_model=NotificacionCountOut)
+def contar_no_leidas(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    usuario_id = get_usuario_id(current_user)
+    return NotificacionCountOut(no_leidas=notificacion_service.contar_no_leidas(db, usuario_id))
+
+
+@router.post("/{notificacion_id}/leer", response_model=NotificacionOut)
+def marcar_como_leida(
+    notificacion_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    usuario_id = get_usuario_id(current_user)
+    return notificacion_service.marcar_leida(db, notificacion_id, usuario_id)
 
 
 @router.get("/proximos-vencimientos", response_model=List[RecordatorioCuotaResponse])

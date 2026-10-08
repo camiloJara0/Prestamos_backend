@@ -39,6 +39,22 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_
 
 # requerimiento de rol superior, sirve en caso de querer restringir el acceso a ciertos endpoints a usuarios con roles específicos
 
+def get_usuario_id(current_user: dict) -> int:
+    """Extrae el id numérico del payload del token (sub es el email)."""
+    if current_user.get("id") is not None:
+        try:
+            return int(current_user["id"])
+        except (TypeError, ValueError):
+            pass
+    sub = current_user.get("sub")
+    if sub is not None and str(sub).isdigit():
+        return int(sub)
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Token sin identificador de usuario",
+    )
+
+
 def require_rol(rol_requerido: str):
     def verificar_rol(current_user: dict = Depends(get_current_user)):
         if current_user.get("rol") != rol_requerido:
