@@ -51,6 +51,13 @@ class TipoPrestamo(Base):
     descripcion = Column(Text)
     interes_mensual = Column(Float)
     max_cuotas = Column(Integer)
+    # RF-076: periodicidad de cobro de las cuotas del préstamo
+    intervalo_pago = Column(
+        Enum("mensual", "quincenal", "bimestral", "personalizado", name="intervalo_pago"),
+        default="mensual",
+        nullable=False,
+    )
+    intervalo_dias = Column(Integer, nullable=True)  # solo si intervalo_pago = "personalizado"
     estado = Column(Enum("activo", "inactivo", name="estado_tipo_prestamo"), default="activo")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

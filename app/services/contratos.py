@@ -29,6 +29,14 @@ def _directorio() -> str:
     return CONTRATOS_DIR
 
 
+def etiqueta_frecuencia(intervalo_pago: str | None, intervalo_dias: int | None = None) -> str:
+    """RF-076: etiqueta de frecuencia de pago para textos legales."""
+    intervalo = intervalo_pago or "mensual"
+    if intervalo == "personalizado":
+        return f"cada {intervalo_dias or 30} días"
+    return {"mensual": "mensuales", "quincenal": "quincenales", "bimestral": "bimestrales"}.get(intervalo, "mensuales")
+
+
 def generar_pdf_contrato(datos: dict) -> io.BytesIO:
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -61,7 +69,7 @@ def generar_pdf_contrato(datos: dict) -> io.BytesIO:
         ),
         Spacer(1, 12),
         Paragraph("<b>Cláusula 1. Objeto.</b> El prestamista entrega al cliente la suma de "
-                  f"${datos['monto']:.2f} por un plazo de {datos['plazo_cuotas']} cuotas mensuales.", normal),
+                  f"${datos['monto']:.2f} por un plazo de {datos['plazo_cuotas']} cuotas {datos.get('frecuencia', 'mensuales')}.", normal),
         Spacer(1, 8),
         Paragraph("<b>Cláusula 2. Interés.</b> El préstamo devengará un interés del "
                   f"{datos['porcentaje_interes']:.2f}% sobre el capital solicitado.", normal),
@@ -102,6 +110,7 @@ def emitir_contrato(
         return existente
 
     cliente = solicitud.cliente
+    tipo = solicitud.tipo_prestamo
     datos = {
         "referencia": f"SOL-{solicitud.id:06d}",
         "prestamista": os.getenv("PRESTAMISTA_NOMBRE", "LoanSoft"),
@@ -109,6 +118,10 @@ def emitir_contrato(
         "cliente_cedula": cliente.cedula if cliente else "—",
         "monto": solicitud.monto_solicitado,
         "plazo_cuotas": solicitud.plazo_cuotas,
+        "frecuencia": etiqueta_frecuencia(
+            getattr(tipo, "intervalo_pago", None) if tipo else None,
+            getattr(tipo, "intervalo_dias", None) if tipo else None,
+        ),
         "porcentaje_interes": solicitud.porcentaje_interes,
         "motivo": solicitud.motivo,
         "fecha_emision": datetime.now().strftime("%d/%m/%Y %H:%M"),

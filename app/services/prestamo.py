@@ -7,7 +7,7 @@ import string
 
 from sqlalchemy.orm import Session, selectinload
 from fastapi import HTTPException
-from datetime import date
+from datetime import date, timedelta
 from dateutil.relativedelta import relativedelta
 from sqlalchemy import or_, func
 
@@ -25,6 +25,23 @@ def generar_referencia_unica_cuota(prestamo_id: int, numero_cuota: int) -> str:
     caracteres = string.ascii_uppercase + string.digits
     hash_aleatorio = ''.join(secrets.choice(caracteres) for _ in range(4))
     return f"REF-P{prestamo_id}C{numero_cuota}-{hash_aleatorio}"
+
+
+def fecha_vencimiento_cuota(
+    fecha_base: date,
+    numero_cuota: int,
+    intervalo_pago: str | None = "mensual",
+    intervalo_dias: int | None = None,
+) -> date:
+    """RF-076: fecha de vencimiento de la cuota según el intervalo de cobro del tipo de préstamo."""
+    intervalo = intervalo_pago or "mensual"
+    if intervalo == "quincenal":
+        return fecha_base + timedelta(days=15 * numero_cuota)
+    if intervalo == "bimestral":
+        return fecha_base + relativedelta(months=2 * numero_cuota)
+    if intervalo == "personalizado":
+        return fecha_base + timedelta(days=(intervalo_dias or 30) * numero_cuota)
+    return fecha_base + relativedelta(months=numero_cuota)
 
 
 def crear_prestamo(db: Session, prestamo: PrestamoCreate, usuario_id: int, ip_address: str | None = None):
@@ -82,7 +99,9 @@ def crear_prestamo(db: Session, prestamo: PrestamoCreate, usuario_id: int, ip_ad
     capital_regular = round(prestamo.capital_prestado / prestamo.numero_cuotas, 2)
 
     for i in range(1, prestamo.numero_cuotas + 1):
-        fecha_vencimiento = date.today() + relativedelta(months=i)
+        fecha_vencimiento = fecha_vencimiento_cuota(
+            date.today(), i, tipo_prestamo.intervalo_pago, tipo_prestamo.intervalo_dias
+        )
         
         if i == prestamo.numero_cuotas:
             val_cuota = round(db_prestamo.monto_total - (cuota_regular * (prestamo.numero_cuotas - 1)), 2)
@@ -218,6 +237,8 @@ def renovar_prestamo(db: Session, prestamo_id: int, renovacion, usuario_id=None,
     if prestamo_original.estado in ["pagado", "perdido", "renovado"]:
         raise HTTPException(status_code=400, detail=f"No se puede renovar un prestamo en estado {prestamo_original.estado}")
 
+    tipo_renovacion = db.query(TipoPrestamo).filter(TipoPrestamo.id == prestamo_original.tipo_prestamo_id).first()
+
     saldo = prestamo_original.saldo_pendiente
 
     abono = renovacion.abono or 0.0
@@ -252,7 +273,11 @@ def renovar_prestamo(db: Session, prestamo_id: int, renovacion, usuario_id=None,
         int_reg = round(interes_total / renovacion.numero_cuotas, 2)
 
         for i in range(1, renovacion.numero_cuotas + 1):
-            fecha_vencimiento = renovacion.fecha_renovacion + relativedelta(months=i)
+            fecha_vencimiento = fecha_vencimiento_cuota(
+                renovacion.fecha_renovacion, i,
+                tipo_renovacion.intervalo_pago if tipo_renovacion else None,
+                tipo_renovacion.intervalo_dias if tipo_renovacion else None,
+            )
             
             if i == renovacion.numero_cuotas:
                 v_cuota = round(monto_total - (cuota_reg * (renovacion.numero_cuotas - 1)), 2)
@@ -485,6 +510,8 @@ def reestructurar_prestamo(db: Session, prestamo_id: int, datos, usuario_id: int
     if prestamo.estado != "activo":
         raise HTTPException(status_code=400, detail=f"No se puede reestructurar un préstamo en estado {prestamo.estado}")
 
+    tipo_reestructuracion = db.query(TipoPrestamo).filter(TipoPrestamo.id == prestamo.tipo_prestamo_id).first()
+
     hoy = date.today()
 
     cuotas_vencidas = db.query(PrestamoCuota).filter(
@@ -607,7 +634,11 @@ def reestructurar_prestamo(db: Session, prestamo_id: int, datos, usuario_id: int
         db.add(PrestamoCuota(
             prestamo_id=prestamo_id,
             numero_cuota=numero,
-            fecha_vencimiento=datos.fecha_inicio + relativedelta(months=i),
+            fecha_vencimiento=fecha_vencimiento_cuota(
+                datos.fecha_inicio, i,
+                tipo_reestructuracion.intervalo_pago if tipo_reestructuracion else None,
+                tipo_reestructuracion.intervalo_dias if tipo_reestructuracion else None,
+            ),
             valor_cuota=round(val_capital + val_interes, 2),
             monto_interes=val_interes,
             capital=val_capital,
