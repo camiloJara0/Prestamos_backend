@@ -20,6 +20,7 @@ from app.routes import (
     pasarela,
     plantilla,
     prestamo,
+    publico,
     push,
     reporte,
     solicitudes,
@@ -142,6 +143,11 @@ app.include_router(dashboard.router)
 app.include_router(configuracion.router)
 app.include_router(conciliacion.router)
 app.include_router(metodos_pago.router)
+# Routers públicos (RF-081): deben registrarse antes de /solicitudes para que
+# /solicitudes/simular no caiga en /solicitudes/{solicitud_id}.
+app.include_router(publico.router_planes)
+app.include_router(publico.router_simulacion)
+app.include_router(publico.router_solicitud)
 app.include_router(solicitudes.router)
 app.include_router(solicitudes.router_contratos)
 app.include_router(plantilla.router)

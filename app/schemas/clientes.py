@@ -1,10 +1,11 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 
 class ClienteBase(BaseModel):
     nombre: str
     cedula: str
     telefono: Optional[str] = None
+    email: Optional[str] = Field(default=None, max_length=120)
     direccion: Optional[str] = None
     persona_referencia: Optional[str] = None
     telefono_referencia: Optional[str] = None

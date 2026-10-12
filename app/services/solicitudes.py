@@ -6,9 +6,9 @@ from datetime import date, datetime, timedelta
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, selectinload
 
-from app.models.models import Cliente, ConfiguracionSistema, Contrato, SolicitudPrestamo, TipoPrestamo
+from app.models.models import Cliente, ConfiguracionSistema, Contrato, SolicitudPrestamo, TipoPrestamo, Usuario
 from app.schemas.prestamo import PrestamoCreate
-from app.schemas.solicitud import DecisionCreate, SolicitudCreate
+from app.schemas.solicitud import DecisionCreate, SolicitudCreate, SolicitudPublicaCreate
 from app.services.contratos import emitir_contrato
 from app.services.prestamo import crear_prestamo
 from app.services.scoring import consultar_scoring
@@ -90,6 +90,135 @@ def crear_solicitud(db: Session, datos: SolicitudCreate, usuario_id: int, ip_add
         ip_address=ip_address,
     )
     return solicitud
+
+
+def crear_solicitud_publica(db: Session, datos: SolicitudPublicaCreate, ip_address: str | None = None):
+    """RF-081: alta de solicitud desde la página pública sin sesión (CA-R6-5/6/8).
+
+    - Rate limiting por IP (RR.F).
+    - Encuentra o crea el cliente por cédula y bloquea duplicados pendientes del día.
+    - Notifica a los administradores para que evalúen con el flujo existente.
+    - Nunca expone datos internos en las respuestas.
+    """
+    from app.services.rate_limit import verificar_rate_limit
+
+    verificar_rate_limit(f"solicitud_publica:{ip_address or 'desconocida'}", maximo=5, ventana_segundos=60)
+
+    tipo = db.query(TipoPrestamo).filter(TipoPrestamo.id == datos.tipo_prestamo_id).first()
+    if not tipo or tipo.estado != "activo":
+        raise HTTPException(status_code=404, detail="Tipo de préstamo no encontrado o inactivo")
+    if tipo.max_cuotas and datos.plazo_cuotas > tipo.max_cuotas:
+        raise HTTPException(
+            status_code=400,
+            detail=f"El plazo no puede superar las {tipo.max_cuotas} cuotas del tipo de préstamo",
+        )
+
+    cliente = db.query(Cliente).filter(Cliente.cedula == datos.cedula).first()
+    cliente_nuevo = cliente is None
+    if cliente_nuevo:
+        cliente = Cliente(
+            nombre=datos.nombre.strip(),
+            cedula=datos.cedula.strip(),
+            telefono=datos.telefono.strip(),
+            email=str(datos.email) if datos.email else None,
+            estado="activo",
+        )
+        db.add(cliente)
+        db.flush()
+    elif cliente.estado != "activo":
+        # CA-R6-8: no exponer el estado interno del cliente
+        raise HTTPException(
+            status_code=400,
+            detail="No fue posible registrar la solicitud con estos datos. Contacta directamente al operador.",
+        )
+
+    hoy_min = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    duplicada = (
+        db.query(SolicitudPrestamo)
+        .filter(
+            SolicitudPrestamo.cliente_id == cliente.id,
+            SolicitudPrestamo.estado == "pendiente",
+            SolicitudPrestamo.created_at >= hoy_min,
+        )
+        .order_by(SolicitudPrestamo.id.desc())
+        .first()
+    )
+    if duplicada:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Ya tienes una solicitud en revisión (#{duplicada.id}). Pronto nos pondremos en contacto.",
+        )
+
+    solicitud = SolicitudPrestamo(
+        cliente_id=cliente.id,
+        tipo_prestamo_id=tipo.id,
+        monto_solicitado=datos.monto_solicitado,
+        plazo_cuotas=datos.plazo_cuotas,
+        porcentaje_interes=tipo.interes_mensual or 0.0,
+        motivo=datos.motivo.strip(),
+        estado="pendiente",
+        usuario_creador_id=None,
+    )
+    db.add(solicitud)
+    db.commit()
+    db.refresh(solicitud)
+
+    from app.services.auditoria import registrar_auditoria
+
+    registrar_auditoria(
+        db,
+        usuario_id=None,
+        tabla_afectada="solicitudes_prestamo",
+        tipo_operacion="CREATE",
+        registro_id=solicitud.id,
+        valores_nuevos={
+            "cliente_id": solicitud.cliente_id,
+            "monto_solicitado": solicitud.monto_solicitado,
+            "plazo_cuotas": solicitud.plazo_cuotas,
+            "estado": solicitud.estado,
+            "origen": "formulario_publico",
+        },
+        descripcion=f"Solicitud pública #{solicitud.id} de {cliente.nombre} (formulario web)",
+        ip_address=ip_address,
+    )
+
+    _notificar_solicitud_publica(db, solicitud, cliente)
+
+    if cliente_nuevo:
+        try:
+            from app.services.eventos_mensajeria import notificar_bienvenida
+
+            notificar_bienvenida(db, cliente)
+        except Exception:  # noqa: BLE001 - la bienvenida no revierte la solicitud
+            logger.exception("Error enviando bienvenida por solicitud pública")
+
+    return solicitud
+
+
+def _notificar_solicitud_publica(db: Session, solicitud: SolicitudPrestamo, cliente: Cliente) -> None:
+    """CA-R6-5: aviso interno a los administradores cuando entra una solicitud pública."""
+    try:
+        from app.services.notificacion import registrar_notificacion
+
+        admins = (
+            db.query(Usuario)
+            .filter(Usuario.rol == "admin", Usuario.estado == "activo")
+            .all()
+        )
+        for admin in admins:
+            registrar_notificacion(
+                db,
+                usuario_id=admin.id,
+                titulo=f"Nueva solicitud pública #{solicitud.id}",
+                mensaje=(
+                    f"{cliente.nombre} solicitó ${solicitud.monto_solicitado:,.0f} "
+                    f"a {solicitud.plazo_cuotas} cuotas desde la página web."
+                ),
+                url=f"/solicitudes/{solicitud.id}",
+                tipo="solicitud",
+            )
+    except Exception:  # noqa: BLE001 - la notificación no revierte la solicitud
+        logger.exception("Error notificando solicitud pública a administradores")
 
 
 def get_solicitudes(

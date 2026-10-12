@@ -31,6 +31,7 @@ class Cliente(Base):
     nombre = Column(String(100), nullable=False)
     cedula = Column(String(20), unique=True, nullable=False)
     telefono = Column(String(20))
+    email = Column(String(120), nullable=True)  # RF-081: contacto del formulario público
     direccion = Column(String(200))
     persona_referencia = Column(String(100))
     telefono_referencia = Column(String(20))

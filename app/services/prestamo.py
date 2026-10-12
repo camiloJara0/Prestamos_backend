@@ -44,6 +44,91 @@ def fecha_vencimiento_cuota(
     return fecha_base + relativedelta(months=numero_cuota)
 
 
+def simular_prestamo(
+    db: Session,
+    tipo_id: int,
+    capital: float,
+    cuotas: int,
+    porcentaje: float | None = None,
+) -> dict:
+    """RF-081/HU-6.2: simulación server-side con EXACTAMENTE la misma lógica de montos y
+    fechas que crear_prestamo (interés por cuota, R1 intervalos) — CA-R6-3."""
+    tipo = (
+        db.query(TipoPrestamo)
+        .filter(TipoPrestamo.id == tipo_id, TipoPrestamo.estado == "activo")
+        .first()
+    )
+    if not tipo:
+        raise HTTPException(status_code=404, detail="Tipo de préstamo no encontrado o inactivo")
+    if capital <= 0:
+        raise HTTPException(status_code=400, detail="El capital debe ser mayor a 0")
+    if cuotas < 1:
+        raise HTTPException(status_code=400, detail="El plazo debe ser al menos 1 cuota")
+    if tipo.max_cuotas and cuotas > tipo.max_cuotas:
+        raise HTTPException(
+            status_code=400,
+            detail=f"El plazo no puede superar las {tipo.max_cuotas} cuotas del tipo de préstamo",
+        )
+
+    pct = porcentaje if porcentaje is not None else (tipo.interes_mensual or 0.0)
+
+    interes_total = round(capital * (pct / 100) * cuotas, 2)
+    monto_total = round(capital + interes_total, 2)
+    valor_cuota = round(monto_total / cuotas, 2)
+
+    hoy = date.today()
+    calendario = []
+    for i in range(1, cuotas + 1):
+        fecha = fecha_vencimiento_cuota(hoy, i, tipo.intervalo_pago, tipo.intervalo_dias)
+        val = (
+            round(monto_total - (valor_cuota * (cuotas - 1)), 2)
+            if i == cuotas
+            else valor_cuota
+        )
+        calendario.append({"numero_cuota": i, "fecha_vencimiento": fecha, "valor_cuota": val})
+
+    from app.services.contratos import etiqueta_frecuencia
+
+    return {
+        "tipo_prestamo_id": tipo.id,
+        "tipo_nombre": tipo.nombre,
+        "capital": capital,
+        "porcentaje_interes": pct,
+        "numero_cuotas": cuotas,
+        "interes_total": interes_total,
+        "monto_total": monto_total,
+        "valor_cuota": valor_cuota,
+        "fecha_primera_cuota": calendario[0]["fecha_vencimiento"],
+        "frecuencia": etiqueta_frecuencia(tipo.intervalo_pago, tipo.intervalo_dias),
+        "calendario": calendario,
+    }
+
+
+def get_planes_publicos(db: Session) -> list[dict]:
+    """RF-081/HU-6.1: planes activos con campos públicos seguros (sin estados internos)."""
+    from app.services.contratos import etiqueta_frecuencia
+
+    tipos = (
+        db.query(TipoPrestamo)
+        .filter(TipoPrestamo.estado == "activo")
+        .order_by(TipoPrestamo.interes_mensual.asc(), TipoPrestamo.id.asc())
+        .all()
+    )
+    return [
+        {
+            "id": t.id,
+            "nombre": t.nombre,
+            "descripcion": t.descripcion,
+            "interes_mensual": t.interes_mensual,
+            "max_cuotas": t.max_cuotas,
+            "intervalo_pago": t.intervalo_pago or "mensual",
+            "intervalo_dias": t.intervalo_dias,
+            "frecuencia": etiqueta_frecuencia(t.intervalo_pago, t.intervalo_dias),
+        }
+        for t in tipos
+    ]
+
+
 def crear_prestamo(db: Session, prestamo: PrestamoCreate, usuario_id: int, ip_address: str | None = None):
     cliente = db.query(Cliente).filter(Cliente.id == prestamo.cliente_id, Cliente.estado == "activo").first()
     if not cliente:
