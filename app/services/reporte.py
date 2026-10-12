@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import extract, func
 from typing import Optional
-from app.models.models import MovimientoCapital, Prestamo, PrestamoPerdido, Pago, PrestamoCuota, Cliente
+from app.models.models import MovimientoCapital, Prestamo, PrestamoPerdido, Pago, PrestamoCuota, Cliente, TipoPago
 from datetime import date, timedelta
 from io import BytesIO
 from openpyxl import Workbook
@@ -311,7 +311,112 @@ def get_reporte_cartera(db: Session, desde: Optional[date] = None, hasta: Option
         ],
     }
 
-def exportar_excel(db: Session, tipo: str, desde: Optional[date] = None, hasta: Optional[date] = None):
+def get_reporte_pagos(db: Session, desde: Optional[date] = None, hasta: Optional[date] = None, tipo_pago_id: Optional[int] = None):
+    """RF-077: pagos del periodo agrupados por método de pago para conciliar la caja por canal."""
+
+    def _filtros(query):
+        query = query.filter(Pago.estado_pago != "devuelto")
+        if desde:
+            query = query.filter(func.date(Pago.fecha_pago) >= desde)
+        if hasta:
+            query = query.filter(func.date(Pago.fecha_pago) <= hasta)
+        if tipo_pago_id:
+            query = query.filter(Pago.tipo_pago_id == tipo_pago_id)
+        return query
+
+    pagos = _filtros(db.query(Pago)).order_by(Pago.fecha_pago.asc(), Pago.id.asc()).all()
+
+    filas_totales = _filtros(
+        db.query(
+            TipoPago.id,
+            TipoPago.nombre,
+            func.count(Pago.id),
+            func.coalesce(func.sum(Pago.capital_pagado), 0.0),
+            func.coalesce(func.sum(Pago.interes_pagado), 0.0),
+            func.coalesce(func.sum(Pago.mora_pagada), 0.0),
+            func.coalesce(func.sum(Pago.valor_pagado), 0.0),
+        )
+        .join(TipoPago, Pago.tipo_pago_id == TipoPago.id)
+    ).group_by(TipoPago.id, TipoPago.nombre).order_by(TipoPago.nombre).all()
+
+    totales_por_metodo = [
+        {
+            "tipo_pago_id": tid,
+            "metodo": nombre,
+            "cantidad": cantidad,
+            "capital": round(capital, 2),
+            "interes": round(interes, 2),
+            "mora": round(mora, 2),
+            "total": round(total, 2),
+        }
+        for tid, nombre, cantidad, capital, interes, mora, total in filas_totales
+    ]
+
+    total_general = {
+        "cantidad": sum(f["cantidad"] for f in totales_por_metodo),
+        "capital": round(sum(f["capital"] for f in totales_por_metodo), 2),
+        "interes": round(sum(f["interes"] for f in totales_por_metodo), 2),
+        "mora": round(sum(f["mora"] for f in totales_por_metodo), 2),
+        "total": round(sum(f["total"] for f in totales_por_metodo), 2),
+    }
+
+    # Pagos devueltos en el periodo: identificados aparte para no des cuadrar la caja
+    query_dev = db.query(func.count(Pago.id), func.coalesce(func.sum(Pago.valor_pagado), 0.0)).filter(Pago.estado_pago == "devuelto")
+    if desde:
+        query_dev = query_dev.filter(func.date(Pago.fecha_pago) >= desde)
+    if hasta:
+        query_dev = query_dev.filter(func.date(Pago.fecha_pago) <= hasta)
+    if tipo_pago_id:
+        query_dev = query_dev.filter(Pago.tipo_pago_id == tipo_pago_id)
+    cantidad_devueltos, total_devueltos = query_dev.one()
+    devueltos = {"cantidad": cantidad_devueltos or 0, "total": round(total_devueltos or 0.0, 2)}
+
+    filas_detalle = (
+        db.query(Pago, TipoPago.nombre, Cliente.nombre, PrestamoCuota.numero_cuota)
+        .join(TipoPago, Pago.tipo_pago_id == TipoPago.id, isouter=True)
+        .join(Cliente, Pago.cliente_id == Cliente.id, isouter=True)
+        .join(PrestamoCuota, Pago.cuota_id == PrestamoCuota.id, isouter=True)
+        .filter(Pago.estado_pago != "devuelto")
+    )
+    if desde:
+        filas_detalle = filas_detalle.filter(func.date(Pago.fecha_pago) >= desde)
+    if hasta:
+        filas_detalle = filas_detalle.filter(func.date(Pago.fecha_pago) <= hasta)
+    if tipo_pago_id:
+        filas_detalle = filas_detalle.filter(Pago.tipo_pago_id == tipo_pago_id)
+    filas_detalle = filas_detalle.order_by(Pago.fecha_pago.asc(), Pago.id.asc()).all()
+
+    detalle = [
+        {
+            "fecha": str(pago.fecha_pago).split("T")[0].split(" ")[0],
+            "referencia_recibo": pago.referencia_recibo,
+            "cliente": cliente or "Sin cliente",
+            "prestamo_id": pago.prestamo_id,
+            "numero_cuota": numero_cuota,
+            "metodo": metodo or "Sin método",
+            "capital": round(pago.capital_pagado or 0.0, 2),
+            "interes": round(pago.interes_pagado or 0.0, 2),
+            "mora": round(pago.mora_pagada or 0.0, 2),
+            "total": round(pago.valor_pagado or 0.0, 2),
+        }
+        for pago, metodo, cliente, numero_cuota in filas_detalle
+    ]
+
+    nota = None
+    if not pagos:
+        nota = "Sin cobros registrados en el periodo seleccionado."
+
+    return {
+        "periodo": _label_periodo(desde, hasta),
+        "nota": nota,
+        "totales_por_metodo": totales_por_metodo,
+        "total_general": total_general,
+        "devueltos": devueltos,
+        "detalle": detalle,
+    }
+
+
+def exportar_excel(db: Session, tipo: str, desde: Optional[date] = None, hasta: Optional[date] = None, tipo_pago_id: Optional[int] = None):
     MORADO_OSCURO = "5B2D8E"
     MORADO_MEDIO = "7B3FC4"
     MORADO_CLARO = "F5F0FF"
@@ -531,6 +636,82 @@ def exportar_excel(db: Session, tipo: str, desde: Optional[date] = None, hasta: 
         ws.cell(row=ultima, column=1).value = f"Periodo: {periodo}  |  Generado: {fecha_hoy}"
         ws.cell(row=ultima, column=1).font = Font(name='Arial', size=8, color="AAAAAA", italic=True)
 
+    elif tipo == "pagos":
+        ws.title = "Reporte de Pagos"
+        datos = get_reporte_pagos(db, desde=desde, hasta=hasta, tipo_pago_id=tipo_pago_id)
+        total = datos["total_general"]
+
+        for col, ancho in zip("ABCDEF", (24, 16, 16, 16, 14, 18)):
+            ws.column_dimensions[col].width = ancho
+
+        estilo_titulo(ws, "SISTEMA DE GESTIÓN DE PRÉSTAMOS", 1, cols=6)
+        ws.row_dimensions[2].height = 10
+
+        for celda, texto in [("A3", "CONCEPTO"), ("B3", "VALOR (COP)")]:
+            estilo_encabezado(ws[celda])
+            ws[celda] = texto
+        ws.row_dimensions[3].height = 22
+
+        resumen = [
+            ("Pagos en el periodo", total["cantidad"], NEGRO),
+            ("Capital Cobrado", total["capital"], NEGRO),
+            ("Interés Cobrado", total["interes"], VERDE),
+            ("Mora Cobrada", total["mora"], VERDE),
+            ("Total Cobrado", total["total"], VERDE),
+            ("Pagos Devueltos (aparte)", datos["devueltos"]["total"], ROJO),
+        ]
+        for i, (concepto, valor, color) in enumerate(resumen, start=4):
+            par = i % 2 == 0
+            ws.row_dimensions[i].height = 20
+            cell_a = ws[f'A{i}']
+            cell_b = ws[f'B{i}']
+            cell_a.value = concepto
+            cell_b.value = valor
+            estilo_dato(cell_a, par)
+            if concepto == "Pagos en el periodo":
+                estilo_monto(cell_b, par, color)
+                cell_b.number_format = '#,##0'
+            else:
+                estilo_monto(cell_b, par, color)
+
+        fila_base = 11
+        encabezados = ["MÉTODO DE PAGO", "PAGOS", "CAPITAL (COP)", "INTERÉS (COP)", "MORA (COP)", "TOTAL (COP)"]
+        for col, texto in enumerate(encabezados, start=1):
+            estilo_encabezado(ws.cell(row=fila_base, column=col, value=texto))
+        ws.row_dimensions[fila_base].height = 22
+
+        for i, d in enumerate(datos["totales_por_metodo"], start=fila_base + 1):
+            par = i % 2 == 0
+            ws.row_dimensions[i].height = 20
+            valores = [d["metodo"], d["cantidad"], d["capital"], d["interes"], d["mora"], d["total"]]
+            for col, valor in enumerate(valores, start=1):
+                cell = ws.cell(row=i, column=col, value=valor)
+                if col >= 3:
+                    estilo_monto(cell, par, VERDE if col != 5 else NEGRO)
+                else:
+                    estilo_dato(cell, par)
+
+        fila_detalle = fila_base + len(datos["totales_por_metodo"]) + 2
+        encabezados_det = ["FECHA", "REFERENCIA", "CLIENTE", "MÉTODO", "CAPITAL (COP)", "TOTAL (COP)"]
+        for col, texto in enumerate(encabezados_det, start=1):
+            estilo_encabezado(ws.cell(row=fila_detalle, column=col, value=texto))
+        ws.row_dimensions[fila_detalle].height = 22
+
+        for i, d in enumerate(datos["detalle"], start=fila_detalle + 1):
+            par = i % 2 == 0
+            ws.row_dimensions[i].height = 20
+            valores = [d["fecha"], d["referencia_recibo"], d["cliente"], d["metodo"], d["capital"], d["total"]]
+            for col, valor in enumerate(valores, start=1):
+                cell = ws.cell(row=i, column=col, value=valor)
+                if col >= 5:
+                    estilo_monto(cell, par, VERDE)
+                else:
+                    estilo_dato(cell, par)
+
+        ultima = fila_detalle + len(datos["detalle"]) + 2
+        ws.cell(row=ultima, column=1).value = f"Periodo: {periodo}  |  Generado: {fecha_hoy}"
+        ws.cell(row=ultima, column=1).font = Font(name='Arial', size=8, color="AAAAAA", italic=True)
+
     else:
         ws.title = "Reporte de Pérdidas"
         datos = get_reporte_perdidas(db, desde=desde, hasta=hasta)
@@ -601,7 +782,7 @@ def exportar_excel(db: Session, tipo: str, desde: Optional[date] = None, hasta: 
     buffer.seek(0)
     return buffer
 
-def exportar_pdf(db: Session, tipo: str, desde: Optional[date] = None, hasta: Optional[date] = None):
+def exportar_pdf(db: Session, tipo: str, desde: Optional[date] = None, hasta: Optional[date] = None, tipo_pago_id: Optional[int] = None):
     MORADO_OSCURO = colors.HexColor("#5B2D8E")
     MORADO_MEDIO = colors.HexColor("#7B3FC4")
     MORADO_CLARO = colors.HexColor("#F5F0FF")
@@ -834,6 +1015,73 @@ def exportar_pdf(db: Session, tipo: str, desde: Optional[date] = None, hasta: Op
             ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
         ]))
         story.append(tabla_dias)
+
+        if datos["nota"]:
+            story.append(Spacer(1, 12))
+            story.append(Paragraph(datos["nota"], estilo_pie))
+
+    elif tipo == "pagos":
+        datos = get_reporte_pagos(db, desde=desde, hasta=hasta, tipo_pago_id=tipo_pago_id)
+        total = datos["total_general"]
+
+        story.append(Paragraph("Pagos por Método de Cobro", estilo_seccion))
+        story.append(HRFlowable(width="100%", thickness=2, color=MORADO_OSCURO, spaceAfter=10))
+
+        resumen_data = [
+            [Paragraph("<b>CONCEPTO</b>", ParagraphStyle('h', fontName='Helvetica-Bold', fontSize=11, textColor=BLANCO, alignment=TA_CENTER)),
+             Paragraph("<b>VALOR (COP)</b>", ParagraphStyle('h', fontName='Helvetica-Bold', fontSize=11, textColor=BLANCO, alignment=TA_CENTER))],
+            ["Pagos en el periodo", f"{total['cantidad']}"],
+            ["Capital Cobrado", f"$ {total['capital']:,.2f}"],
+            ["Interés Cobrado", f"$ {total['interes']:,.2f}"],
+            ["Mora Cobrada", f"$ {total['mora']:,.2f}"],
+            ["Total Cobrado", f"$ {total['total']:,.2f}"],
+            ["Pagos Devueltos (aparte)", f"$ {datos['devueltos']['total']:,.2f}"],
+        ]
+        tabla = Table(resumen_data, colWidths=[4*inch, 3*inch])
+        tabla.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), MORADO_MEDIO),
+            ('TEXTCOLOR', (0, 0), (-1, 0), BLANCO),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [MORADO_CLARO, BLANCO]),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#CCCCCC")),
+            ('ALIGN', (1, 1), (1, -1), 'RIGHT'),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('LEFTPADDING', (0, 0), (-1, -1), 12),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+        ]))
+        story.append(tabla)
+        story.append(Spacer(1, 16))
+
+        story.append(Paragraph("Totales por Método de Pago", estilo_seccion))
+        story.append(HRFlowable(width="100%", thickness=2, color=MORADO_OSCURO, spaceAfter=10))
+
+        met_data = [[
+            Paragraph("<b>MÉTODO</b>", ParagraphStyle('m1', fontName='Helvetica-Bold', fontSize=10, textColor=BLANCO, alignment=TA_CENTER)),
+            Paragraph("<b>PAGOS</b>", ParagraphStyle('m2', fontName='Helvetica-Bold', fontSize=10, textColor=BLANCO, alignment=TA_CENTER)),
+            Paragraph("<b>CAPITAL</b>", ParagraphStyle('m3', fontName='Helvetica-Bold', fontSize=10, textColor=BLANCO, alignment=TA_CENTER)),
+            Paragraph("<b>INTERÉS</b>", ParagraphStyle('m4', fontName='Helvetica-Bold', fontSize=10, textColor=BLANCO, alignment=TA_CENTER)),
+            Paragraph("<b>MORA</b>", ParagraphStyle('m5', fontName='Helvetica-Bold', fontSize=10, textColor=BLANCO, alignment=TA_CENTER)),
+            Paragraph("<b>TOTAL</b>", ParagraphStyle('m6', fontName='Helvetica-Bold', fontSize=10, textColor=BLANCO, alignment=TA_CENTER)),
+        ]]
+        for d in datos["totales_por_metodo"]:
+            met_data.append([
+                d["metodo"], str(d["cantidad"]),
+                f"$ {d['capital']:,.0f}", f"$ {d['interes']:,.0f}",
+                f"$ {d['mora']:,.0f}", f"$ {d['total']:,.0f}",
+            ])
+        tabla_met = Table(met_data, colWidths=[1.6*inch, 0.8*inch, 1.2*inch, 1.2*inch, 1.0*inch, 1.2*inch])
+        tabla_met.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), MORADO_MEDIO),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [MORADO_CLARO, BLANCO]),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#CCCCCC")),
+            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 9),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        story.append(tabla_met)
 
         if datos["nota"]:
             story.append(Spacer(1, 12))

@@ -17,7 +17,7 @@ from datetime import date
 from app.db.database import SessionLocal
 from app.services.reporte import (
     get_reporte_ganancias, get_reporte_perdidas, exportar_excel, exportar_pdf,
-    get_reporte_cobranza, get_reporte_cartera
+    get_reporte_cobranza, get_reporte_cartera, get_reporte_pagos
 )
 from app.dependencies.auth import get_current_user
 
@@ -178,4 +178,45 @@ def cobranza_pdf(
         buffer,
         media_type="application/pdf",
         headers={"Content-Disposition": "attachment; filename=cobranza.pdf"}
+    )
+
+@router.get("/pagos")
+def reporte_pagos(
+    desde: Optional[date] = Query(None, description="Fecha desde (ej: 2026-08-01)"),
+    hasta: Optional[date] = Query(None, description="Fecha hasta (ej: 2026-08-31)"),
+    tipo_pago_id: Optional[int] = Query(None, description="Filtrar por un método de pago específico"),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """RF-077: pagos del periodo agrupados por método de pago para conciliación de caja"""
+    return get_reporte_pagos(db, desde=desde, hasta=hasta, tipo_pago_id=tipo_pago_id)
+
+@router.get("/pagos/excel")
+def pagos_excel(
+    desde: Optional[date] = Query(None),
+    hasta: Optional[date] = Query(None),
+    tipo_pago_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    buffer = exportar_excel(db, "pagos", desde=desde, hasta=hasta, tipo_pago_id=tipo_pago_id)
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=pagos.xlsx"}
+    )
+
+@router.get("/pagos/pdf")
+def pagos_pdf(
+    desde: Optional[date] = Query(None),
+    hasta: Optional[date] = Query(None),
+    tipo_pago_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    buffer = exportar_pdf(db, "pagos", desde=desde, hasta=hasta, tipo_pago_id=tipo_pago_id)
+    return StreamingResponse(
+        buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=pagos.pdf"}
     )
