@@ -554,5 +554,55 @@ class EnvioMensaje(Base):
     plantilla = relationship("PlantillaMensaje")
 
 
+class TipoCita(Base):
+    """Tipos de cita personalizados de la agenda (RF-080 / HU-5.3)."""
+
+    __tablename__ = "tipos_cita"
+
+    id = Column(Integer, primary_key=True, index=True)
+    nombre = Column(String(100), nullable=False)
+    descripcion = Column(String(255), nullable=True)
+    color = Column(String(20), default="#7c3aed", nullable=False)
+    duracion_minutos = Column(Integer, default=30, nullable=False)
+    estado = Column(
+        Enum("activo", "inactivo", name="estado_tipo_cita"),
+        default="activo",
+        nullable=False,
+    )
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class EventoAgenda(Base):
+    """Eventos del calendario operativo (RF-080): cuotas, recogidas, citas y seguimientos."""
+
+    __tablename__ = "eventos_agenda"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tipo = Column(
+        Enum("cuota_vence", "recogida", "cita", "seguimiento", "otro", name="tipo_evento_agenda"),
+        nullable=False,
+    )
+    titulo = Column(String(200), nullable=False)
+    descripcion = Column(String(500), nullable=True)
+    fecha = Column(Date, nullable=False, index=True)
+    hora_inicio = Column(String(5), nullable=True)  # HH:MM
+    hora_fin = Column(String(5), nullable=True)  # HH:MM
+    prestamo_id = Column(Integer, ForeignKey("prestamos.id"), nullable=True)
+    cliente_id = Column(Integer, ForeignKey("clientes.id"), nullable=True)
+    tipo_cita_id = Column(Integer, ForeignKey("tipos_cita.id"), nullable=True)
+    estado = Column(
+        Enum("pendiente", "completado", "cancelado", "vencido", name="estado_evento_agenda"),
+        default="pendiente",
+        nullable=False,
+    )
+    observaciones = Column(String(500), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    cliente = relationship("Cliente")
+    prestamo = relationship("Prestamo")
+    tipo_cita = relationship("TipoCita")
+
+
 # Validar relaciones de SQLAlchemy
 configure_mappers()

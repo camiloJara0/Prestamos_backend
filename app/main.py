@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.db.database import init_db
 from app.services.scheduler import iniciar_scheduler, scheduler
 from app.routes import (
+    agenda,
     auditoria,
     auth,
     capital,
@@ -152,3 +153,5 @@ app.include_router(solicitudes.router)
 app.include_router(solicitudes.router_contratos)
 app.include_router(plantilla.router)
 app.include_router(pasarela.router)
+app.include_router(agenda.router)
+app.include_router(agenda.router_prestamos)

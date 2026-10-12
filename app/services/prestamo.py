@@ -245,6 +245,14 @@ def crear_prestamo(db: Session, prestamo: PrestamoCreate, usuario_id: int, ip_ad
 
     _correo_prestamo_creado(db, db_prestamo, cliente, usuario_id)
 
+    try:
+        # RF-080: eventos de vencimiento en la agenda; idempotente, no revierte el préstamo.
+        from app.services.agenda import generar_eventos_cuota
+
+        generar_eventos_cuota(db, db_prestamo.id)
+    except Exception:  # noqa: BLE001
+        pass
+
     return db_prestamo
 
 
