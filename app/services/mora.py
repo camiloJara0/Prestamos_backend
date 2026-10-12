@@ -176,7 +176,13 @@ def calcular_mora(db: Session, cuota: PrestamoCuota, pago: Pago = None) -> Mora 
             },
             descripcion=f"Mora generada automáticamente para cuota #{mora.cuota_id}"
         )
-        
+
+        try:
+            from app.services.eventos_mensajeria import notificar_mora_aviso
+            notificar_mora_aviso(db, cuota, valor_mora, dias_atraso)
+        except Exception:  # noqa: BLE001 - la mensajería no revierte la mora
+            pass
+
         return mora
 
 def procesar_moras(db: Session, tasa_diaria: float = None):

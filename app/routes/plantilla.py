@@ -1,5 +1,7 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
+from datetime import date
+from typing import Optional
 
 from app.dependencies.auth import get_current_user, get_db, require_rol
 from app.schemas.plantilla import (
@@ -26,6 +28,33 @@ def listar_plantillas(
     current_user: dict = Depends(get_current_user),
 ):
     return plantillas_service.get_plantillas(db, canal=canal)
+
+
+@router.get("/metricas")
+def metricas_envios(
+    desde: Optional[date] = Query(None, description="Fecha desde (ej: 2026-08-01)"),
+    hasta: Optional[date] = Query(None, description="Fecha hasta (ej: 2026-08-31)"),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_rol("admin")),
+):
+    """RF-079: totales de envíos por canal, estado y plantilla en el periodo"""
+    return plantillas_service.get_metricas_envios(db, desde=desde, hasta=hasta)
+
+
+@router.get("/envios")
+def historial_envios(
+    plantilla_id: Optional[int] = Query(None),
+    canal: Optional[str] = Query(None),
+    desde: Optional[date] = Query(None),
+    hasta: Optional[date] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_rol("admin")),
+):
+    """RF-079: historial reciente de envíos para auditar la comunicación"""
+    return plantillas_service.get_envios(
+        db, plantilla_id=plantilla_id, canal=canal, desde=desde, hasta=hasta, limit=limit
+    )
 
 
 @router.get("/{plantilla_id}", response_model=PlantillaOut)

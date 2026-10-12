@@ -15,6 +15,9 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
+from fastapi import HTTPException
+
+from app.models.models import PlantillaMensaje
 from app.services.plantillas import componer_mensaje, registrar_envio
 
 logger = logging.getLogger(__name__)
@@ -40,22 +43,38 @@ def enviar_por_canal(
     destinatario: str,
     clave: str,
     contexto: dict,
+    dedupe_clave: str | None = None,
 ) -> dict:
     """Compone el mensaje desde la plantilla y lo envía por el canal indicado.
 
     Siempre registra el resultado en envios_mensaje. Nunca lanza excepción.
     """
+    def _plantilla_id_por_clave() -> int | None:
+        fila = db.query(PlantillaMensaje).filter(
+            PlantillaMensaje.clave == clave, PlantillaMensaje.canal == canal
+        ).first()
+        return fila.id if fila else None
+
     try:
         asunto, cuerpo, plantilla = componer_mensaje(db, clave, canal, contexto)
+    except HTTPException as exc:
+        # RF-079/CA-R4-5: plantilla desactivada → omitido registrado, sin error
+        motivo = str(exc.detail)
+        estado = "omitido" if "inactiva" in motivo else "fallido"
+        registrar_envio(db, canal, destinatario, None, "", estado, motivo,
+                        _plantilla_id_por_clave(), dedupe_clave=dedupe_clave)
+        return {"estado": estado, "motivo": motivo}
     except Exception as exc:  # noqa: BLE001 - plantilla rota no debe tumbar el evento
         logger.error("[CANALES] Error componiendo %s/%s: %s", canal, clave, exc)
-        registrar_envio(db, canal, destinatario, None, "", "fallido", str(exc))
+        registrar_envio(db, canal, destinatario, None, "", "fallido", str(exc),
+                        _plantilla_id_por_clave(), dedupe_clave=dedupe_clave)
         return {"estado": "fallido", "motivo": str(exc)}
 
     if not destinatario:
         registro = registrar_envio(
             db, canal, destinatario or "(sin destinatario)", asunto, cuerpo,
             "omitido", "Sin destinatario registrado", plantilla.id if plantilla else None,
+            dedupe_clave=dedupe_clave,
         )
         return {"estado": "omitido", "motivo": registro.motivo}
 
@@ -68,6 +87,7 @@ def enviar_por_canal(
         registro = registrar_envio(
             db, canal, destinatario, asunto, cuerpo, estado, motivo,
             plantilla.id if plantilla else None,
+            dedupe_clave=dedupe_clave,
         )
         return {"estado": estado, "motivo": motivo}
 
@@ -76,6 +96,7 @@ def enviar_por_canal(
         registro = registrar_envio(
             db, canal, destinatario, asunto, cuerpo, "omitido",
             f"Proveedor de {canal} no configurado", plantilla.id if plantilla else None,
+            dedupe_clave=dedupe_clave,
         )
         return {"estado": "omitido", "motivo": registro.motivo}
 
@@ -84,14 +105,16 @@ def enviar_por_canal(
         registro = registrar_envio(
             db, canal, destinatario, asunto, cuerpo, "omitido", motivo_ventana,
             plantilla.id if plantilla else None,
+            dedupe_clave=dedupe_clave,
         )
-        return {"estado": "omitido", "motivo": motivo_ventana}
+        return {"estado": "omitido", "motivo": registro.motivo}
 
     if proveedor == "piloto":
         logger.info("[CANALES] (%s piloto) a %s: %s", canal, destinatario, cuerpo[:120])
         registro = registrar_envio(
             db, canal, destinatario, asunto, cuerpo, "enviado",
             "Envío simulado por proveedor piloto", plantilla.id if plantilla else None,
+            dedupe_clave=dedupe_clave,
         )
         return {"estado": "enviado", "motivo": registro.motivo}
 
@@ -100,6 +123,7 @@ def enviar_por_canal(
         registro = registrar_envio(
             db, canal, destinatario, asunto, cuerpo, "enviado", None,
             plantilla.id if plantilla else None,
+            dedupe_clave=dedupe_clave,
         )
         return {"estado": "enviado", "motivo": None}
     except Exception as exc:  # noqa: BLE001 - el fallo no revierte el evento
@@ -107,6 +131,7 @@ def enviar_por_canal(
         registro = registrar_envio(
             db, canal, destinatario, asunto, cuerpo, "fallido", str(exc),
             plantilla.id if plantilla else None,
+            dedupe_clave=dedupe_clave,
         )
         return {"estado": "fallido", "motivo": registro.motivo}
 

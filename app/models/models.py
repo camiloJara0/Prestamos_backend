@@ -547,6 +547,7 @@ class EnvioMensaje(Base):
         nullable=False,
     )
     motivo = Column(String(255), nullable=True)
+    dedupe_clave = Column(String(120), nullable=True)  # RF-079: evita duplicados por evento/día
     fecha = Column(DateTime, default=datetime.utcnow)
 
     plantilla = relationship("PlantillaMensaje")

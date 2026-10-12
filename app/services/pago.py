@@ -124,6 +124,13 @@ def registrar_pago(db: Session, pago: PagoCreate, usuario_id: int, ip_address: s
         ip_address=ip_address,
     )
 
+    try:
+        from app.services.eventos_mensajeria import notificar_pago_confirmado
+        cliente = db.query(Cliente).filter(Cliente.id == db_pago.cliente_id).first()
+        notificar_pago_confirmado(db, db_pago, cuota, cliente)
+    except Exception:  # noqa: BLE001 - la mensajería no revierte el pago
+        pass
+
     return db_pago
 
 

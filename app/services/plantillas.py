@@ -6,6 +6,7 @@ por los valores del contexto.
 """
 
 import re
+from datetime import date
 from typing import Optional
 
 from fastapi import HTTPException
@@ -64,6 +65,36 @@ PLANTILLAS_POR_DEFECTO = [
         "cuerpo": (
             "Hola {{nombre}}, tu solicitud de préstamo por ${{monto}} fue {{estado}}. "
             "Motivo: {{motivo}}."
+        ),
+    },
+    {
+        "clave": "pago_confirmado",
+        "canal": "sms",
+        "nombre": "Confirmación de pago recibido",
+        "asunto": "Pago recibido",
+        "cuerpo": (
+            "Hola {{nombre}}, recibimos tu pago de ${{monto}} por la cuota {{numero_cuota}} "
+            "(Recibo: {{referencia}}). Gracias."
+        ),
+    },
+    {
+        "clave": "mora_aviso",
+        "canal": "sms",
+        "nombre": "Aviso de mora",
+        "asunto": "Aviso de mora",
+        "cuerpo": (
+            "Hola {{nombre}}, la cuota {{numero_cuota}} acumula ${{monto_mora}} de mora "
+            "por {{dias_atraso}} día(s) de atraso. Referencia: {{referencia}}."
+        ),
+    },
+    {
+        "clave": "cliente_bienvenida",
+        "canal": "sms",
+        "nombre": "Bienvenida de nuevo cliente",
+        "asunto": "Bienvenido",
+        "cuerpo": (
+            "Hola {{nombre}}, bienvenido(a). Tu registro quedó completo. "
+            "Estamos listos para ayudarte con tu préstamo."
         ),
     },
 ]
@@ -181,6 +212,7 @@ def registrar_envio(
     estado: str,
     motivo: str | None = None,
     plantilla_id: int | None = None,
+    dedupe_clave: str | None = None,
 ) -> EnvioMensaje:
     registro = EnvioMensaje(
         canal=canal,
@@ -190,8 +222,105 @@ def registrar_envio(
         estado=estado,
         motivo=motivo,
         plantilla_id=plantilla_id,
+        dedupe_clave=dedupe_clave,
     )
     db.add(registro)
     db.commit()
     db.refresh(registro)
     return registro
+
+
+def get_metricas_envios(db: Session, desde: Optional[date] = None, hasta: Optional[date] = None) -> dict:
+    """RF-079: totales de envíos por canal, estado y plantilla en el rango consultado."""
+    from sqlalchemy import func
+
+    def _filtro(query):
+        if desde:
+            query = query.filter(func.date(EnvioMensaje.fecha) >= desde)
+        if hasta:
+            query = query.filter(func.date(EnvioMensaje.fecha) <= hasta)
+        return query
+
+    filas_canal = _filtro(
+        db.query(EnvioMensaje.canal, EnvioMensaje.estado, func.count(EnvioMensaje.id))
+    ).group_by(EnvioMensaje.canal, EnvioMensaje.estado).all()
+
+    por_canal: dict[str, dict] = {}
+    resumen = {"enviado": 0, "omitido": 0, "fallido": 0}
+    for canal, estado, cantidad in filas_canal:
+        bloque = por_canal.setdefault(canal, {"enviado": 0, "omitido": 0, "fallido": 0, "total": 0})
+        bloque[estado] = cantidad
+        bloque["total"] += cantidad
+        resumen[estado] += cantidad
+
+    total_envios = sum(resumen.values())
+    tasa = round(resumen["enviado"] / total_envios * 100, 1) if total_envios else 0.0
+
+    filas_plantilla = _filtro(
+        db.query(PlantillaMensaje.clave, PlantillaMensaje.nombre, EnvioMensaje.estado, func.count(EnvioMensaje.id))
+        .join(PlantillaMensaje, EnvioMensaje.plantilla_id == PlantillaMensaje.id)
+    ).group_by(PlantillaMensaje.clave, PlantillaMensaje.nombre, EnvioMensaje.estado).all()
+
+    por_plantilla: dict[str, dict] = {}
+    for clave, nombre, estado, cantidad in filas_plantilla:
+        bloque = por_plantilla.setdefault(
+            clave, {"clave": clave, "nombre": nombre, "enviado": 0, "omitido": 0, "fallido": 0, "total": 0}
+        )
+        bloque[estado] = cantidad
+        bloque["total"] += cantidad
+
+    return {
+        "periodo": _label_periodo_metricas(desde, hasta),
+        "resumen": {**resumen, "total": total_envios, "tasa_exito": tasa},
+        "por_canal": por_canal,
+        "por_plantilla": sorted(por_plantilla.values(), key=lambda f: f["clave"]),
+    }
+
+
+def _label_periodo_metricas(desde, hasta) -> str:
+    if desde and hasta:
+        return f"{desde} a {hasta}"
+    if desde:
+        return f"Desde {desde}"
+    if hasta:
+        return f"Hasta {hasta}"
+    return "Todos los periodos"
+
+
+def get_envios(
+    db: Session,
+    plantilla_id: int | None = None,
+    canal: str | None = None,
+    desde: Optional[date] = None,
+    hasta: Optional[date] = None,
+    limit: int = 50,
+) -> list[dict]:
+    """RF-079: historial reciente de envíos para auditar la comunicación con clientes."""
+    from sqlalchemy import func
+
+    query = db.query(EnvioMensaje, PlantillaMensaje.clave)
+    query = query.join(PlantillaMensaje, EnvioMensaje.plantilla_id == PlantillaMensaje.id, isouter=True)
+    if plantilla_id:
+        query = query.filter(EnvioMensaje.plantilla_id == plantilla_id)
+    if canal:
+        query = query.filter(EnvioMensaje.canal == canal)
+    if desde:
+        query = query.filter(func.date(EnvioMensaje.fecha) >= desde)
+    if hasta:
+        query = query.filter(func.date(EnvioMensaje.fecha) <= hasta)
+    filas = query.order_by(EnvioMensaje.fecha.desc()).limit(limit).all()
+
+    return [
+        {
+            "id": envio.id,
+            "fecha": str(envio.fecha),
+            "canal": envio.canal,
+            "destinatario": envio.destinatario,
+            "asunto": envio.asunto,
+            "estado": envio.estado,
+            "motivo": envio.motivo,
+            "plantilla_id": envio.plantilla_id,
+            "clave": clave,
+        }
+        for envio, clave in filas
+    ]

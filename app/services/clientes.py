@@ -34,6 +34,11 @@ def create_cliente(db: Session, cliente: ClienteCreate):
     db.add(db_cliente)
     db.commit()
     db.refresh(db_cliente)
+    try:
+        from app.services.eventos_mensajeria import notificar_bienvenida
+        notificar_bienvenida(db, db_cliente)
+    except Exception:  # noqa: BLE001 - la mensajería no revierte la creación
+        pass
     return db_cliente
 
 def update_cliente(db: Session, cliente_id: int, cliente: ClienteUpdate):
