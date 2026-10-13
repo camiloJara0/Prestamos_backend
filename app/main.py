@@ -23,6 +23,7 @@ from app.routes import (
     prestamo,
     publico,
     push,
+    recordatorio,
     reporte,
     solicitudes,
     tipo_pago,
@@ -139,6 +140,7 @@ app.include_router(mora.router)
 app.include_router(reporte.router)
 app.include_router(auditoria.router)
 app.include_router(notificacion.router)
+app.include_router(recordatorio.router)
 app.include_router(push.router)
 app.include_router(dashboard.router)
 app.include_router(configuracion.router)

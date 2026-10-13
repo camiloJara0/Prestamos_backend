@@ -1,7 +1,5 @@
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
-from datetime import date, timedelta
-from urllib.parse import quote_plus
 from typing import List
 
 from app.db.database import SessionLocal
@@ -15,7 +13,7 @@ from app.schemas.notificacion import (
 from app.schemas.pagination import PaginatedResponse
 from app.dependencies.auth import get_current_user, get_usuario_id
 from app.services import notificacion as notificacion_service
-from app.models.models import PrestamoCuota, Prestamo, Cliente, MetodoPagoPrestamista
+from app.services import recordatorios as recordatorio_service
 
 router = APIRouter(prefix="/notificacion", tags=["Notificaciones"])
 
@@ -96,78 +94,7 @@ def obtener_proximos_vencimientos(
     """
     Obtiene las cuotas pendientes que vencen en los próximos N días.
     Genera la plantilla con el formato Credifast y el enlace directo a WhatsApp.
+    La consulta y el formato viven en app.services.recordatorios (compartido con
+    los recordatorios masivos).
     """
-    hoy = date.today()
-    fecha_limite = hoy + timedelta(days=dias_anticipacion)
-
-    # Consulta optimizada uniendo Cuotas -> Préstamos -> Clientes
-    cuotas_proximas = (
-        db.query(PrestamoCuota, Prestamo, Cliente)
-        .join(Prestamo, PrestamoCuota.prestamo_id == Prestamo.id)
-        .join(Cliente, Prestamo.cliente_id == Cliente.id)
-        .filter(
-            PrestamoCuota.estado == "pendiente",
-            PrestamoCuota.fecha_vencimiento >= hoy,
-            PrestamoCuota.fecha_vencimiento <= fecha_limite
-        )
-        .order_by(PrestamoCuota.fecha_vencimiento.asc())
-        .all()
-    )
-
-    resultado = []
-    meses = [
-        "enero", "febrero", "marzo", "abril", "mayo", "junio", 
-        "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"
-    ]
-
-    for cuota, prestamo, cliente in cuotas_proximas:
-        dias_restantes = (cuota.fecha_vencimiento - hoy).days
-        
-        # Formato del monto sin decimales y con puntos de miles (ej: 105.000)
-        monto_fmt = f"{int(cuota.valor_cuota):,}".replace(",", ".")
-        
-        # Formato de fecha legible (ej: 24 octubre)
-        fecha_str = f"{cuota.fecha_vencimiento.day} {meses[cuota.fecha_vencimiento.month - 1]}"
-        
-        # Extraer solo el primer nombre del cliente
-        primer_nombre = cliente.nombre.split()[0].capitalize() if cliente.nombre else "Cliente"
-        referencia = cuota.referencia_pago or f"REF-P{prestamo.id}C{cuota.numero_cuota}"
-
-        # Plantilla limpia (sin espacios especiales ni invisibles)
-        mensaje = (
-            f"Hola {primer_nombre}\n"
-            f"Recuerda que se acerca la fecha de pago de tu cuota con Credifast 💸\n"
-            f"👉Cuota {monto_fmt}\n"
-            f"📆 Fecha límite : {fecha_str}\n\n"
-            f"Puedes hacer el pago por transferencia o programar recogida"
-        )
-
-        # Formatear teléfono con indicativo de Colombia (+57)
-        telefono_limpio = "".join(filter(str.isdigit, cliente.telefono or ""))
-        if len(telefono_limpio) == 10:
-            telefono_limpio = f"57{telefono_limpio}"
-
-        # Uso de api.whatsapp.com/send con quote_plus para forzar interpretación limpia en WhatsApp Web / App
-        if telefono_limpio:
-            mensaje_encoded = quote_plus(mensaje)
-            url_wa = f"https://api.whatsapp.com/send?phone={telefono_limpio}&text={mensaje_encoded}"
-        else:
-            url_wa = ""
-
-        resultado.append(
-            RecordatorioCuotaResponse(
-                cuota_id=cuota.id,
-                prestamo_id=prestamo.id,
-                cliente_nombre=cliente.nombre,
-                cliente_telefono=cliente.telefono or "",
-                numero_cuota=cuota.numero_cuota,
-                monto=cuota.valor_cuota,
-                fecha_vencimiento=cuota.fecha_vencimiento,
-                dias_para_vencer=dias_restantes,
-                referencia_pago=referencia,
-                mensaje_whatsapp=mensaje,
-                whatsapp_url=url_wa
-            )
-        )
-
-    return resultado
+    return recordatorio_service.proximos_vencimientos(db, dias_anticipacion)
