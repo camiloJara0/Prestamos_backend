@@ -8,7 +8,7 @@ from app.models.base import Base
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./test.db")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 engine_kwargs = {}
 if DATABASE_URL.startswith("sqlite"):
