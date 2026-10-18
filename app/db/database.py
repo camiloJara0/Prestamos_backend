@@ -13,10 +13,16 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 engine_kwargs = {}
 if DATABASE_URL.startswith("sqlite"):
     engine_kwargs["connect_args"] = {"check_same_thread": False}
+    
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace(
+        "postgres://",
+        "postgresql+psycopg2://",
+        1
+    )
 
 engine = create_engine(DATABASE_URL, echo=True, **engine_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
 
 def _apply_simple_migrations():
     """Mini-migración de desarrollo: maneja cambios estructurales específicos y dinámicos."""
