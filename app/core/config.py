@@ -5,7 +5,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     DATABASE_URL: str
     ENCRYPTION_KEY: str
-    FRONTEND_URL: str = "http://localhost:3000"
+    FRONTEND_URL: str = "https://taskflow.ctsantaisabel.com"
 
     # Web Push
     VAPID_PUBLIC_KEY: str

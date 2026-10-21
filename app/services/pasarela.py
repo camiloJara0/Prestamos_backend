@@ -83,7 +83,7 @@ def crear_intencion_pago(db: Session, cuota_id: int, usuario_id: int | None = No
         creado_por=usuario_id,
     )
     if proveedor == "piloto":
-        base = (os.getenv("FRONTEND_URL") or "http://localhost:3000").rstrip("/")
+        base = (os.getenv("FRONTEND_URL") or "https://taskflow.ctsantaisabel.com").rstrip("/")
         transaccion.url_pago = f"{base}/pagos/en-linea?tx={transaccion.referencia_externa}"
     db.add(transaccion)
     db.commit()

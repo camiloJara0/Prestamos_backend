@@ -168,7 +168,7 @@ def _enviar_correo_reset(usuario: Usuario, reset_token: str) -> None:
 
     from app.services.email import enviar_correo
 
-    base_url = (os.getenv("FRONTEND_URL") or "http://localhost:3000").rstrip("/")
+    base_url = (os.getenv("FRONTEND_URL") or "https://taskflow.ctsantaisabel.com").rstrip("/")
     enlace = f"{base_url}/restablecer?token={reset_token}"
     asunto = "Recupera tu contraseña de LoanSoft"
     texto = (
