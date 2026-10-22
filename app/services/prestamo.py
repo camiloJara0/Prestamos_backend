@@ -2,6 +2,7 @@
 # calcula interes, monto total, genera cuotas y registra movimiento de capital
 # usa transacciones para garantizar consistencia en la DB
 
+import logging
 import secrets
 import string
 
@@ -15,6 +16,8 @@ from app.models.models import Prestamo, PrestamoCuota, MovimientoCapital, Capita
 from app.schemas.prestamo import PrestamoCreate
 from app.services.capital import get_or_create_capital
 from app.utils.pagination import paginate
+
+logger = logging.getLogger(__name__)
 
 
 def generar_referencia_unica_cuota(prestamo_id: int, numero_cuota: int) -> str:
@@ -250,22 +253,43 @@ def crear_prestamo(db: Session, prestamo: PrestamoCreate, usuario_id: int, ip_ad
         from app.services.agenda import generar_eventos_cuota
 
         generar_eventos_cuota(db, db_prestamo.id)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "[PRESTAMOS] Fallo generando eventos de agenda del préstamo #%s: %s",
+            db_prestamo.id, exc,
+        )
+        try:
+            db.rollback()
+        except Exception:  # noqa: BLE001
+            logger.error(
+                "[PRESTAMOS] No se pudo limpiar la sesión tras el fallo de agenda del préstamo #%s",
+                db_prestamo.id,
+            )
 
     return db_prestamo
+
+
+def _usuario_para_aviso(db: Session, usuario_id):
+    """El aviso debe llegar aunque se pase el email (sub del JWT) o el id numérico."""
+    from app.models.models import Usuario
+
+    valor = str(usuario_id)
+    if valor.isdigit():
+        usuario = db.query(Usuario).filter(Usuario.id == int(valor)).first()
+        if usuario:
+            return usuario
+    return db.query(Usuario).filter(Usuario.email == valor).first()
 
 
 def _correo_prestamo_creado(db: Session, prestamo, cliente, usuario_id: int) -> None:
     """RF-061: aviso por correo de la creación del préstamo; un fallo no revierte la operación."""
     try:
-        from app.models.models import Usuario
         from app.services.canales import enviar_por_canal
 
-        usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
+        usuario = _usuario_para_aviso(db, usuario_id)
         if not usuario:
             return
-        enviar_por_canal(
+        resultado = enviar_por_canal(
             db,
             canal="email",
             destinatario=usuario.email,
@@ -277,8 +301,25 @@ def _correo_prestamo_creado(db: Session, prestamo, cliente, usuario_id: int) -> 
                 "numero_cuotas": prestamo.numero_cuotas,
             },
         )
-    except Exception:  # noqa: BLE001 - el fallo de correo no revierte la creación
-        pass
+        if resultado.get("estado") == "fallido":
+            logger.warning(
+                "[PRESTAMOS] Aviso de creación del préstamo #%s no entregado por correo: %s",
+                prestamo.id, resultado.get("motivo"),
+            )
+    except Exception as exc:  # noqa: BLE001 - el fallo de correo no revierte la creación
+        logger.error(
+            "[PRESTAMOS] Fallo enviando correo de creación del préstamo #%s: %s",
+            prestamo.id, exc,
+        )
+        # El préstamo ya quedó commiteado; se limpia la sesión para que la
+        # serialización de la respuesta no falle con PendingRollbackError.
+        try:
+            db.rollback()
+        except Exception:  # noqa: BLE001
+            logger.error(
+                "[PRESTAMOS] No se pudo limpiar la sesión tras el fallo de correo del préstamo #%s",
+                prestamo.id,
+            )
 
 
 def get_prestamos(
