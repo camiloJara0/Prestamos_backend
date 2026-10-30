@@ -3,6 +3,7 @@ from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException
 from app.models.models import Mora, PrestamoCuota, Pago, ConfiguracionSistema
 from app.schemas.mora import MoraCreate, MoraUpdate, MoraOut
+from app.core.context import aplicar_filtro_usuario
 from datetime import date, timedelta
 
 
@@ -21,9 +22,36 @@ def obtener_parametro_config(db: Session, clave: str, default_value: str = "0.0"
     return float(default_value)
 
 
+def obtener_parametro_texto(db: Session, clave: str, default_value: str = "") -> str:
+    """Obtiene un parámetro de configuración del sistema como texto."""
+    config = db.query(ConfiguracionSistema).filter(
+        ConfiguracionSistema.clave == clave,
+        ConfiguracionSistema.activo == True
+    ).first()
+    if config and config.valor is not None:
+        return str(config.valor).strip()
+    return default_value
+
+
+def valor_mora_diaria(db: Session, cuota: PrestamoCuota, tasa_forzada: float | None = None) -> float:
+    """Mora diaria según el modo configurado (RF: porcentaje o valor fijo).
+
+    - mora_tipo = "porcentaje" (default): cuota.valor_cuota * (tasa_mora_diaria / 100)
+    - mora_tipo = "fijo": mora_valor_fijo por día de atraso (ej. 3000)
+    """
+    if tasa_forzada is not None:
+        return cuota.valor_cuota * (tasa_forzada / 100)
+
+    modo = obtener_parametro_texto(db, "mora_tipo", "porcentaje").lower()
+    if modo == "fijo":
+        return obtener_parametro_config(db, "mora_valor_fijo", "0.0")
+    tasa_diaria = obtener_parametro_config(db, "tasa_mora_diaria", "0.5") / 100
+    return cuota.valor_cuota * tasa_diaria
+
+
 def get_moras(db: Session, page: int = 1, limit: int = 10):
     """Obtiene las moras en estado generada con paginación B11."""
-    query = db.query(Mora).filter(Mora.estado == "generada")
+    query = aplicar_filtro_usuario(db.query(Mora), Mora).filter(Mora.estado == "generada")
     total = query.count()
     offset = (page - 1) * limit
     items = query.order_by(Mora.fecha.desc()).offset(offset).limit(limit).all()
@@ -47,7 +75,7 @@ def get_moras_prestamo(db: Session, prestamo_id: int):
     )
 
 def get_mora(db: Session, mora_id: int):
-    return db.query(Mora).filter(Mora.id == mora_id).first()
+    return aplicar_filtro_usuario(db.query(Mora), Mora).filter(Mora.id == mora_id).first()
 
 def update_mora(db: Session, mora_id: int, mora: MoraUpdate, usuario_id=None, ip_address: str | None = None):
     db_mora = get_mora(db, mora_id)
@@ -99,7 +127,7 @@ def delete_mora(db: Session, mora_id: int, usuario_id=None, ip_address: str | No
         )
     return db_mora
 
-def calcular_mora(db: Session, cuota: PrestamoCuota, pago: Pago = None) -> Mora | None:
+def calcular_mora(db: Session, cuota: PrestamoCuota, pago: Pago = None, tasa_forzada: float | None = None) -> Mora | None:
     """
     Calcula mora para una cuota usando parámetros de ConfiguracionSistema.
     - tasa_mora_diaria: porcentaje diario de mora
@@ -107,7 +135,6 @@ def calcular_mora(db: Session, cuota: PrestamoCuota, pago: Pago = None) -> Mora 
     """
     
     # Obtener parámetros del sistema
-    tasa_diaria = obtener_parametro_config(db, "tasa_mora_diaria", "0.5") / 100  # Convertir de porcentaje a decimal
     dias_gracia = int(obtener_parametro_config(db, "dias_gracia_mora", "3"))
     
     # Si cuota está pagada, no hay mora
@@ -129,8 +156,8 @@ def calcular_mora(db: Session, cuota: PrestamoCuota, pago: Pago = None) -> Mora 
     if cuota.estado == "parcial" and pago and pago.interes_pagado == cuota.interes:
         return None
     
-    # Calcular valor de mora
-    valor_mora = cuota.valor_cuota * tasa_diaria * dias_atraso
+    # Calcular valor de mora (modo porcentaje o valor fijo)
+    valor_mora = valor_mora_diaria(db, cuota, tasa_forzada=tasa_forzada) * dias_atraso
     
     # Buscar si ya existe una mora registrada para esta cuota
     mora_existente = (
@@ -188,22 +215,21 @@ def calcular_mora(db: Session, cuota: PrestamoCuota, pago: Pago = None) -> Mora 
 def procesar_moras(db: Session, tasa_diaria: float = None):
     """
     Procesa moras para todas las cuotas vencidas.
-    Si no se proporciona tasa_diaria, se obtiene de ConfiguracionSistema.
+    Si se proporciona tasa_diaria explícitamente se usa como porcentaje;
+    si no, cada cuota lee su modo de mora (porcentaje o fijo) de configuración.
     """
-    
-    # Si se proporciona tasa_diaria explícitamente, usarla; sino, leer de configuración
-    if tasa_diaria is None:
-        tasa_diaria = obtener_parametro_config(db, "tasa_mora_diaria", "0.5") / 100
-    else:
-        tasa_diaria = tasa_diaria / 100  # Convertir de porcentaje a decimal
-    
-    # Obtener solo cuotas no pagadas
     cuotas = db.query(PrestamoCuota).filter(PrestamoCuota.estado != "pagado").all()
     moras_generadas = []
-    
+
     for cuota in cuotas:
         pago = db.query(Pago).filter(Pago.cuota_id == cuota.id).first()
-        mora = calcular_mora(db, cuota, pago)
+        # modo fijo no se ve afectado por la tasa explícita (es un valor por día)
+        modo = obtener_parametro_texto(db, "mora_tipo", "porcentaje").lower()
+        if tasa_diaria is not None and modo != "fijo":
+            cuota_valor_forzado = tasa_diaria
+        else:
+            cuota_valor_forzado = None
+        mora = calcular_mora(db, cuota, pago, tasa_forzada=cuota_valor_forzado)
         if mora:
             moras_generadas.append(mora)
     

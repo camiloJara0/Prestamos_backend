@@ -5,10 +5,11 @@ from fastapi import HTTPException
 
 from app.models.models import Cliente
 from app.schemas.clientes import ClienteCreate, ClienteUpdate
+from app.core.context import aplicar_filtro_usuario
 from app.utils.pagination import paginate
 
 def get_clientes(db: Session, page: int = 1, limit: int = 10, busqueda: str | None = None):
-    query = db.query(Cliente).filter(Cliente.estado == "activo")
+    query = aplicar_filtro_usuario(db.query(Cliente), Cliente).filter(Cliente.estado == "activo")
     
     if busqueda:
         termino = f"%{busqueda}%"
@@ -24,7 +25,7 @@ def get_clientes(db: Session, page: int = 1, limit: int = 10, busqueda: str | No
     return paginate(query, page=page, limit=limit)
 
 def get_cliente(db: Session, cliente_id: int):
-    return db.query(Cliente).filter(Cliente.id == cliente_id).first()
+    return aplicar_filtro_usuario(db.query(Cliente), Cliente).filter(Cliente.id == cliente_id).first()
 
 def create_cliente(db: Session, cliente: ClienteCreate):
     existente = db.query(Cliente).filter(Cliente.cedula == cliente.cedula).first()

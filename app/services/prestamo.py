@@ -15,6 +15,7 @@ from sqlalchemy import or_, func
 from app.models.models import Prestamo, PrestamoCuota, MovimientoCapital, Capital, Cliente, TipoPrestamo, PrestamoRenovacion, PrestamoPerdido, PrestamoReestructuracion, Mora, Pago
 from app.schemas.prestamo import PrestamoCreate
 from app.services.capital import get_or_create_capital
+from app.core.context import aplicar_filtro_usuario
 from app.utils.pagination import paginate
 
 logger = logging.getLogger(__name__)
@@ -47,12 +48,46 @@ def fecha_vencimiento_cuota(
     return fecha_base + relativedelta(months=numero_cuota)
 
 
+def dias_intervalo(tipo: TipoPrestamo | None) -> int:
+    """Días promedio entre cuotas según la periodicidad del tipo de préstamo."""
+    if not tipo:
+        return 30
+    intervalo = getattr(tipo, "intervalo_pago", None) or "mensual"
+    if intervalo == "quincenal":
+        return 15
+    if intervalo == "bimestral":
+        return 60
+    if intervalo == "personalizado":
+        return int(getattr(tipo, "intervalo_dias", None) or 30)
+    return 30
+
+
+def calcular_interes_total(
+    capital: float,
+    porcentaje: float,
+    numero_cuotas: int,
+    aplicacion: str = "por_pago",
+    dias_entre_cuotas: int = 30,
+) -> float:
+    """Total de intereses según el modo de aplicación del tipo de préstamo.
+
+    - "por_pago": el % se cobra por cada cuota/pago (4 cuotas = 4 × %).
+    - "mensual": el % es mensual y se cobra por los meses cubiertos
+      (4 cuotas quincenales = 2 meses = 2 × %).
+    """
+    if aplicacion == "mensual":
+        meses = max(1, round(numero_cuotas * dias_entre_cuotas / 30))
+        return round(capital * (porcentaje / 100) * meses, 2)
+    return round(capital * (porcentaje / 100) * numero_cuotas, 2)
+
+
 def simular_prestamo(
     db: Session,
     tipo_id: int,
     capital: float,
     cuotas: int,
     porcentaje: float | None = None,
+    fecha: date | None = None,
 ) -> dict:
     """RF-081/HU-6.2: simulación server-side con EXACTAMENTE la misma lógica de montos y
     fechas que crear_prestamo (interés por cuota, R1 intervalos) — CA-R6-3."""
@@ -75,11 +110,17 @@ def simular_prestamo(
 
     pct = porcentaje if porcentaje is not None else (tipo.interes_mensual or 0.0)
 
-    interes_total = round(capital * (pct / 100) * cuotas, 2)
+    interes_total = calcular_interes_total(
+        capital,
+        pct,
+        cuotas,
+        aplicacion=getattr(tipo, "aplicacion_interes", "por_pago") or "por_pago",
+        dias_entre_cuotas=dias_intervalo(tipo),
+    )
     monto_total = round(capital + interes_total, 2)
     valor_cuota = round(monto_total / cuotas, 2)
 
-    hoy = date.today()
+    hoy = fecha or date.today()
     calendario = []
     for i in range(1, cuotas + 1):
         fecha = fecha_vencimiento_cuota(hoy, i, tipo.intervalo_pago, tipo.intervalo_dias)
@@ -157,6 +198,9 @@ def crear_prestamo(db: Session, prestamo: PrestamoCreate, usuario_id: int, ip_ad
     ).first()
     if not tipo_prestamo:
         raise HTTPException(status_code=404, detail="Tipo de préstamo no encontrado o inactivo")
+
+    # RF: respetar la fecha informada por el usuario (préstamos con fecha anterior).
+    fecha_base = prestamo.fecha_prestamo or date.today()
     
     capital = db.query(Capital).first()
     if not capital or capital.monto_total < prestamo.capital_prestado:
@@ -165,15 +209,19 @@ def crear_prestamo(db: Session, prestamo: PrestamoCreate, usuario_id: int, ip_ad
     db_prestamo = Prestamo(
         cliente_id=prestamo.cliente_id,
         tipo_prestamo_id=prestamo.tipo_prestamo_id,
-        fecha_prestamo=date.today(),
+        fecha_prestamo=fecha_base,
         capital_prestado=prestamo.capital_prestado,
         porcentaje_interes=prestamo.porcentaje_interes,
         numero_cuotas=prestamo.numero_cuotas,
         estado="activo"
     )
     
-    db_prestamo.interes_total = round(
-        prestamo.capital_prestado * (prestamo.porcentaje_interes / 100) * prestamo.numero_cuotas, 2
+    db_prestamo.interes_total = calcular_interes_total(
+        prestamo.capital_prestado,
+        prestamo.porcentaje_interes,
+        prestamo.numero_cuotas,
+        aplicacion=getattr(tipo_prestamo, "aplicacion_interes", "por_pago") or "por_pago",
+        dias_entre_cuotas=dias_intervalo(tipo_prestamo),
     )
     db_prestamo.monto_total = round(prestamo.capital_prestado + db_prestamo.interes_total, 2)
     db_prestamo.valor_cuota = round(db_prestamo.monto_total / prestamo.numero_cuotas, 2)
@@ -188,7 +236,7 @@ def crear_prestamo(db: Session, prestamo: PrestamoCreate, usuario_id: int, ip_ad
 
     for i in range(1, prestamo.numero_cuotas + 1):
         fecha_vencimiento = fecha_vencimiento_cuota(
-            date.today(), i, tipo_prestamo.intervalo_pago, tipo_prestamo.intervalo_dias
+            fecha_base, i, tipo_prestamo.intervalo_pago, tipo_prestamo.intervalo_dias
         )
         
         if i == prestamo.numero_cuotas:
@@ -332,7 +380,7 @@ def get_prestamos(
     fecha_hasta: date = None,
     busqueda: str = None
 ):
-    query = db.query(Prestamo)
+    query = aplicar_filtro_usuario(db.query(Prestamo), Prestamo)
     if estado and estado != "todos":
         query = query.filter(Prestamo.estado == estado)
     if cliente_id:
@@ -351,17 +399,13 @@ def get_prestamos(
 
 
 def obtener_prestamo(db: Session, prestamo_id: int):
-    return (
-        db.query(Prestamo)
-        .options(
-            selectinload(Prestamo.cliente),
-            selectinload(Prestamo.tipo_prestamo),
-            selectinload(Prestamo.cuotas),
-            selectinload(Prestamo.pagos),
-        )
-        .filter(Prestamo.id == prestamo_id)
-        .first()
+    query = aplicar_filtro_usuario(db.query(Prestamo), Prestamo).options(
+        selectinload(Prestamo.cliente),
+        selectinload(Prestamo.tipo_prestamo),
+        selectinload(Prestamo.cuotas),
+        selectinload(Prestamo.pagos),
     )
+    return query.filter(Prestamo.id == prestamo_id).first()
 
 
 def renovar_prestamo(db: Session, prestamo_id: int, renovacion, usuario_id=None, ip_address: str | None = None):

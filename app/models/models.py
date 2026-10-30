@@ -28,6 +28,7 @@ class Cliente(Base):
     __tablename__ = "clientes"
 
     id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), index=True, nullable=True)
     nombre = Column(String(100), nullable=False)
     cedula = Column(String(20), unique=True, nullable=False)
     telefono = Column(String(20))
@@ -48,6 +49,7 @@ class TipoPrestamo(Base):
     __tablename__ = "tipos_prestamo"
 
     id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), index=True, nullable=True)
     nombre = Column(String(100), nullable=False)
     descripcion = Column(Text)
     interes_mensual = Column(Float)
@@ -59,6 +61,14 @@ class TipoPrestamo(Base):
         nullable=False,
     )
     intervalo_dias = Column(Integer, nullable=True)  # solo si intervalo_pago = "personalizado"
+    # Cómo se aplica el interés de este tipo: "mensual" cobra el % por cada mes
+    # calendario; "por_pago" cobra el % por cada cuota/pago (ej. quincenal = 2%
+    # por quincena). Ver services/prestamo.calcular_interes_total.
+    aplicacion_interes = Column(
+        Enum("mensual", "por_pago", name="aplicacion_interes"),
+        default="por_pago",
+        nullable=False,
+    )
     estado = Column(Enum("activo", "inactivo", name="estado_tipo_prestamo"), default="activo")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -70,6 +80,7 @@ class Prestamo(Base):
     __tablename__ = "prestamos"
 
     id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), index=True, nullable=True)
     cliente_id = Column(Integer, ForeignKey("clientes.id"))
     tipo_prestamo_id = Column(Integer, ForeignKey("tipos_prestamo.id"))
 
@@ -130,6 +141,7 @@ class TipoPago(Base):
     __tablename__ = "tipos_pago"
 
     id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), index=True, nullable=True)
     nombre = Column(String(50), nullable=False)
     descripcion = Column(Text)
     estado = Column(Enum("activo", "inactivo", name="estado_tipo_pago"), default="activo")
@@ -162,6 +174,7 @@ class Pago(Base):
     __tablename__ = "pagos"
 
     id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), index=True, nullable=True)
     prestamo_id = Column(Integer, ForeignKey("prestamos.id"))
     cliente_id = Column(Integer, ForeignKey("clientes.id"))
     cuota_id = Column(Integer, ForeignKey("prestamo_cuotas.id"), nullable=True)
@@ -208,6 +221,7 @@ class MovimientoCapital(Base):
     __tablename__ = "movimientos_capital"
 
     id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), index=True, nullable=True)
     tipo_movimiento = Column(Enum(
         "inversion",
         "retiro",
@@ -229,6 +243,7 @@ class PrestamoRenovacion(Base):
     __tablename__ = "prestamos_renovaciones"
 
     id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), index=True, nullable=True)
     prestamo_anterior_id = Column(Integer, ForeignKey("prestamos.id"))
     prestamo_nuevo_id = Column(Integer, ForeignKey("prestamos.id"))
     fecha = Column(Date)
@@ -241,6 +256,7 @@ class PrestamoReestructuracion(Base):
     __tablename__ = "prestamos_reestructuraciones"
 
     id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), index=True, nullable=True)
     prestamo_id = Column(Integer, ForeignKey("prestamos.id"))
     fecha = Column(Date)
     motivo = Column(Text)
@@ -259,6 +275,7 @@ class Mora(Base):
     __tablename__ = "moras"
 
     id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), index=True, nullable=True)
     prestamo_id = Column(Integer, ForeignKey("prestamos.id"))
     cuota_id = Column(Integer, ForeignKey("prestamo_cuotas.id"))
     fecha = Column(Date)
@@ -271,6 +288,7 @@ class PrestamoPerdido(Base):
     __tablename__ = "prestamos_perdidos"
 
     id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), index=True, nullable=True)
     prestamo_id = Column(Integer, ForeignKey("prestamos.id"))
     fecha = Column(Date)
     valor_perdido = Column(Float)
@@ -333,6 +351,7 @@ class Capital(Base):
     __tablename__ = "capital"
 
     id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), index=True, nullable=True)
     monto_total = Column(Float, default=0.0)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -341,6 +360,7 @@ class ConfiguracionSistema(Base):
     __tablename__ = "configuracion_sistema"
 
     id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), index=True, nullable=True)
     clave = Column(String(100), unique=True, nullable=False)
     valor = Column(String(255), nullable=False)
     descripcion = Column(Text)
@@ -469,6 +489,7 @@ class PlantillaMensaje(Base):
     __tablename__ = "plantillas_mensaje"
 
     id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), index=True, nullable=True)
     clave = Column(String(80), unique=True, nullable=False)
     canal = Column(
         Enum("email", "sms", "whatsapp", name="canal_plantilla"),
@@ -487,6 +508,7 @@ class Contrato(Base):
     __tablename__ = "contratos"
 
     id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), index=True, nullable=True)
     solicitud_id = Column(Integer, ForeignKey("solicitudes_prestamo.id"), nullable=True)
     prestamo_id = Column(Integer, ForeignKey("prestamos.id"), nullable=True)
     estado = Column(
@@ -537,6 +559,7 @@ class EnvioMensaje(Base):
     __tablename__ = "envios_mensaje"
 
     id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), index=True, nullable=True)
     canal = Column(Enum("email", "sms", "whatsapp", name="canal_envio"), nullable=False)
     destinatario = Column(String(120), nullable=False)
     asunto = Column(String(200), nullable=True)
@@ -560,6 +583,7 @@ class TipoCita(Base):
     __tablename__ = "tipos_cita"
 
     id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), index=True, nullable=True)
     nombre = Column(String(100), nullable=False)
     descripcion = Column(String(255), nullable=True)
     color = Column(String(20), default="#7c3aed", nullable=False)
@@ -579,6 +603,7 @@ class EventoAgenda(Base):
     __tablename__ = "eventos_agenda"
 
     id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), index=True, nullable=True)
     tipo = Column(
         Enum("cuota_vence", "recogida", "cita", "seguimiento", "otro", name="tipo_evento_agenda"),
         nullable=False,

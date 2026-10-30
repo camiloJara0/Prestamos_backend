@@ -5,6 +5,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError
 from sqlalchemy.orm import Session
 from app.core.security import decode_token
+from app.core.context import usuario_actual_id, usuario_actual_rol
 from app.db.database import SessionLocal
 from app.models.models import Token
 
@@ -34,7 +35,18 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token invalidado, inicia sesion nuevamente"
         )
-    
+
+    # Registra el usuario actual en el contexto (aislamiento multiusuario).
+    try:
+        uid = payload.get("id")
+        if uid is None:
+            sub = payload.get("sub")
+            uid = int(sub) if sub is not None and str(sub).isdigit() else None
+        usuario_actual_id.set(uid)
+        usuario_actual_rol.set(payload.get("rol"))
+    except Exception:  # noqa: BLE001 - el contexto no debe romper la autenticación
+        pass
+
     return payload
 
 # requerimiento de rol superior, sirve en caso de querer restringir el acceso a ciertos endpoints a usuarios con roles específicos

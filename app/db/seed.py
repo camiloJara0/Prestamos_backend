@@ -99,6 +99,18 @@ def seed():
                 "tipo_valor": "int"
             },
             {
+                "clave": "mora_tipo",
+                "valor": "porcentaje",
+                "descripcion": "Modo de mora diaria: 'porcentaje' o 'fijo'",
+                "tipo_valor": "string"
+            },
+            {
+                "clave": "mora_valor_fijo",
+                "valor": "0",
+                "descripcion": "Valor fijo de mora por día cuando mora_tipo = 'fijo'",
+                "tipo_valor": "float"
+            },
+            {
                 "clave": "dias_expiracion_solicitud",
                 "valor": "7",
                 "descripcion": "Días que una solicitud aprobada espera antes de expirar (RF-021)",

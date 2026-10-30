@@ -5,6 +5,7 @@ from fastapi import HTTPException
 
 from app.models.models import Pago, PrestamoCuota, Prestamo, MovimientoCapital, TipoPago, Capital, Cliente
 from app.schemas.pago import PagoCreate, PagoDevolucionCreate, PagoOut
+from app.core.context import aplicar_filtro_usuario
 from app.utils.pagination import paginate
 
 
@@ -21,7 +22,7 @@ def _validar_pago(db: Session, pago: PagoCreate):
     if cuota.estado == "pagado":
         raise HTTPException(status_code=400, detail="La cuota ya ha sido completamente pagada")
 
-    prestamo = db.query(Prestamo).filter(Prestamo.id == pago.prestamo_id).first()
+    prestamo = aplicar_filtro_usuario(db.query(Prestamo), Prestamo).filter(Prestamo.id == pago.prestamo_id).first()
     if not prestamo:
         raise HTTPException(status_code=404, detail="Préstamo no encontrado")
     if cuota.prestamo_id != prestamo.id:
@@ -246,7 +247,7 @@ def get_pagos(
     """Historial global de pagos con filtros por cliente, fecha y tipo (RF-041)."""
     from sqlalchemy import func
 
-    query = db.query(Pago)
+    query = aplicar_filtro_usuario(db.query(Pago), Pago)
     if cliente_id is not None:
         query = query.filter(Pago.cliente_id == cliente_id)
     if tipo_pago_id is not None:

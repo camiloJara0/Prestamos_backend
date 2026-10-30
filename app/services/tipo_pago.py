@@ -1,15 +1,16 @@
 from sqlalchemy.orm import Session
 from app.models.models import TipoPago
 from app.schemas.tipo_pago import TipoPagoCreate, TipoPagoUpdate
+from app.core.context import aplicar_filtro_usuario
 from app.utils.pagination import paginate
 
 def get_tipo_pagos(db: Session, page: int = 1, limit: int = 10):
-    query = db.query(TipoPago).filter(TipoPago.estado == "activo")
+    query = aplicar_filtro_usuario(db.query(TipoPago), TipoPago).filter(TipoPago.estado == "activo")
     query = query.order_by(TipoPago.id.asc())
     return paginate(query, page=page, limit=limit)
 
 def get_tipo_pago(db: Session, tipo_pago_id: int):
-    return db.query(TipoPago).filter(TipoPago.id == tipo_pago_id).first()
+    return aplicar_filtro_usuario(db.query(TipoPago), TipoPago).filter(TipoPago.id == tipo_pago_id).first()
 
 def create_tipo_pago(db: Session, tipo_pago: TipoPagoCreate):
     db_tipo_pago = TipoPago(**tipo_pago.dict())

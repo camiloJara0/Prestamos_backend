@@ -17,6 +17,7 @@ from app.routes import (
     metodos_pago,  # <-- 1. Importamos el router de métodos de pago y QR
     mora,
     notificacion,
+    onboarding,
     pago,
     pasarela,
     plantilla,
@@ -64,6 +65,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Contexto de usuario por request (aislamiento multiusuario). Debe ir después
+# de CORS para que el token ya esté disponible en las cabeceras.
+from app.core.middleware import ContextoUsuarioMiddleware
+
+app.add_middleware(ContextoUsuarioMiddleware)
 
 # RF-074 · Cabeceras de seguridad y política de contenidos.
 CABECERAS_SEGURIDAD = {
@@ -158,3 +165,4 @@ app.include_router(plantilla.router)
 app.include_router(pasarela.router)
 app.include_router(agenda.router)
 app.include_router(agenda.router_prestamos)
+app.include_router(onboarding.router)

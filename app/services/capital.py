@@ -8,10 +8,11 @@ from datetime import date
 
 from app.models.models import MovimientoCapital, Capital
 from app.schemas.capital import MovimientoCapitalCreate
+from app.core.context import aplicar_filtro_usuario
 from app.utils.pagination import paginate
 
 def get_or_create_capital(db: Session) -> Capital:
-    capital = db.query(Capital).first()
+    capital = aplicar_filtro_usuario(db.query(Capital), Capital).first()
     if not capital:
         capital = Capital(monto_total=0.0)
         db.add(capital)
@@ -75,7 +76,7 @@ def get_movimientos_capital(
     """
     Historial paginado de movimientos de capital con filtros de periodo y tipo (RF-051).
     """
-    query = db.query(MovimientoCapital)
+    query = aplicar_filtro_usuario(db.query(MovimientoCapital), MovimientoCapital)
     if desde:
         query = query.filter(MovimientoCapital.fecha >= desde)
     if hasta:
@@ -90,7 +91,7 @@ def get_resumen_caja(db: Session, desde: Optional[date] = None, hasta: Optional[
     """
     Totales de ingresos y egresos de caja (aportes y retiros) en el periodo (RF-051).
     """
-    query = db.query(MovimientoCapital).filter(
+    query = aplicar_filtro_usuario(db.query(MovimientoCapital), MovimientoCapital).filter(
         MovimientoCapital.tipo_movimiento.in_(["inversion", "retiro"])
     )
     if desde:

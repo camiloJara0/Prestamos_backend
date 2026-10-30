@@ -1,5 +1,7 @@
 """Endpoints públicos sin autenticación (RF-081: simulador de préstamos)."""
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
@@ -36,12 +38,13 @@ def simular(
     capital: float = Query(..., gt=0, description="Monto solicitado"),
     cuotas: int = Query(..., ge=1, le=120, description="Número de cuotas"),
     porcentaje: float | None = Query(None, ge=0, le=100),
+    fecha: date | None = Query(None, description="Fecha del préstamo (por defecto hoy)"),
     request: Request = None,
     db: Session = Depends(get_db),
 ):
     """CA-R6-3/4: simulación server-side sin token con la lógica de crear_prestamo."""
     verificar_rate_limit(f"simular:{_ip(request) or 'desconocida'}", maximo=120, ventana_segundos=60)
-    return simular_prestamo(db, tipo_id, capital, cuotas, porcentaje)
+    return simular_prestamo(db, tipo_id, capital, cuotas, porcentaje, fecha=fecha)
 
 
 @router_solicitud.post("/", response_model=SolicitudPublicaOut, status_code=201)

@@ -2,6 +2,7 @@ from pydantic import BaseModel, model_validator
 from typing import Optional
 
 INTERVALOS_PAGO = ("mensual", "quincenal", "bimestral", "personalizado")
+APLICACIONES_INTERES = ("mensual", "por_pago")
 
 
 class TipoPrestamoBase(BaseModel):
@@ -12,6 +13,9 @@ class TipoPrestamoBase(BaseModel):
     estado: Optional[str] = "activo"
     intervalo_pago: Optional[str] = "mensual"
     intervalo_dias: Optional[int] = None
+    # Cómo se aplica el interés: "mensual" (% por mes cubierto) o
+    # "por_pago" (% por cada cuota/pago).
+    aplicacion_interes: Optional[str] = "por_pago"
 
     @model_validator(mode="after")
     def validar_intervalo(self):
@@ -22,6 +26,8 @@ class TipoPrestamoBase(BaseModel):
                 raise ValueError("El intervalo personalizado requiere intervalo_dias >= 1")
         elif self.intervalo_dias is not None:
             raise ValueError("intervalo_dias solo aplica cuando intervalo_pago es 'personalizado'")
+        if (self.aplicacion_interes or "por_pago") not in APLICACIONES_INTERES:
+            raise ValueError(f"aplicacion_interes debe ser uno de: {', '.join(APLICACIONES_INTERES)}")
         return self
 
 
