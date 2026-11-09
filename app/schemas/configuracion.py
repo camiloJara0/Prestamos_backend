@@ -17,6 +17,7 @@ class ConfiguracionUpdate(BaseModel):
 class ConfiguracionOut(ConfiguracionBase):
     id: int
     activo: bool
+    origen: str = "global"  # 'global' o 'usuario' (override personalizado)
 
     class Config:
         from_attributes = True

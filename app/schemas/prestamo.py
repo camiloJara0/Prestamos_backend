@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, computed_field
 from typing import Optional
 from datetime import date
 
@@ -29,7 +29,7 @@ class PrestamoOut(BaseModel):
     saldo_pendiente: float
     estado: str
     observaciones: Optional[str] = None
-
+    
     class Config:
         from_attributes = True
 
@@ -41,9 +41,16 @@ class CuotaOut(BaseModel):
     valor_cuota: float
     capital: float
     interes: float
-    mora: float
+    mora: float = 0.0
     referencia_pago: Optional[str] = None  # <--- AGREGADO AQUÍ
     estado: str
+
+    @field_validator("mora", mode="before")
+    @classmethod
+    def normalizar_mora(cls, valor):
+        # La columna mora es nullable en BD: las cuotas sin mora calculada
+        # deben salir como 0.0 y no como null (rompería el detalle del préstamo).
+        return 0.0 if valor is None else valor
 
     class Config:
         from_attributes = True
@@ -54,6 +61,7 @@ class PrestamoDetalleOut(PrestamoOut):
     tipo_prestamo: Optional[TipoPrestamoOut] = None
     cuotas: list[CuotaOut] = Field(default_factory=list)
     pagos: list[PagoOut] = Field(default_factory=list)
+    mora_vigente: Optional[dict] = None  # mora/total al día de hoy (tiempo real)
 
 
 class RenovacionCreate(BaseModel):

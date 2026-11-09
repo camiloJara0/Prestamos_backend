@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Respons
 from sqlalchemy.orm import Session
 
 from app.db.database import SessionLocal
-from app.models.models import MetodoPagoPrestamista, PrestamoCuota, Usuario
+from app.models.models import MetodoPagoPrestamista, Prestamo, PrestamoCuota, Usuario
 from app.schemas.metodo_pago import (
     MetodoPagoPrestamistaCreate, 
     MetodoPagoPrestamistaOut, 
@@ -238,6 +238,14 @@ def obtener_datos_para_pago_cuota(
 
     cuota = db.query(PrestamoCuota).filter(PrestamoCuota.id == cuota_id).first()
     if not cuota:
+        raise HTTPException(status_code=404, detail="La cuota especificada no existe.")
+    # Solo se comparten datos de cobro de cuotas de préstamos propios.
+    prestamo_pertenece = (
+        db.query(Prestamo)
+        .filter(Prestamo.id == cuota.prestamo_id, Prestamo.usuario_id == usuario_id)
+        .first()
+    )
+    if not prestamo_pertenece:
         raise HTTPException(status_code=404, detail="La cuota especificada no existe.")
 
     datos = obtener_datos_cobro_cuota(metodo, cuota)

@@ -144,6 +144,7 @@ def _asegurar_parametros_base():
         ("dias_gracia_mora", "3", "Días de gracia antes de aplicar mora", "int"),
         ("mora_tipo", "porcentaje", "Modo de mora diaria: 'porcentaje' o 'fijo'", "string"),
         ("mora_valor_fijo", "0", "Valor fijo de mora por día cuando mora_tipo = 'fijo'", "float"),
+        ("mora_tipo_calculo", "simple", "Tipo de cálculo de mora: 'simple' (lineal) o 'compuesta'", "string"),
     ]
     with SessionLocal() as db:
         existentes = {c.clave for c in db.query(ConfiguracionSistema).all()}

@@ -3,17 +3,33 @@ from datetime import date
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models.models import Capital, Mora, MovimientoCapital, Pago, Prestamo, PrestamoCuota, PrestamoPerdido
+from app.core.context import aplicar_filtro_usuario
+from app.models.models import (
+    Capital,
+    Mora,
+    MovimientoCapital,
+    Pago,
+    Prestamo,
+    PrestamoCuota,
+    PrestamoPerdido,
+)
+from app.services.mora import mora_vigente_total, parametros_mora
+
+
+def _cuotas(db: Session):
+    """Cuotas visibles para el usuario actual (se ven por su préstamo)."""
+    query = db.query(PrestamoCuota).join(Prestamo, PrestamoCuota.prestamo_id == Prestamo.id)
+    return aplicar_filtro_usuario(query, Prestamo)
 
 
 def obtener_resumen_dashboard(db: Session) -> dict:
     # 1. Capital Actual
-    capital_obj = db.query(Capital).first()
+    capital_obj = aplicar_filtro_usuario(db.query(Capital), Capital).first()
     capital_actual = capital_obj.monto_total if capital_obj else 0.0
 
     # 2. Conteo de préstamos agrupado por estado
     estados_query = (
-        db.query(Prestamo.estado, func.count(Prestamo.id))
+        aplicar_filtro_usuario(db.query(Prestamo.estado, func.count(Prestamo.id)), Prestamo)
         .group_by(Prestamo.estado)
         .all()
     )
@@ -30,70 +46,70 @@ def obtener_resumen_dashboard(db: Session) -> dict:
     # 3. Préstamos activos y saldo pendiente total
     prestamos_activos = prestamos_por_estado.get("activo", 0)
     saldo_pendiente_total = (
-        db.query(func.coalesce(func.sum(Prestamo.saldo_pendiente), 0.0))
+        aplicar_filtro_usuario(
+            db.query(func.coalesce(func.sum(Prestamo.saldo_pendiente), 0.0)), Prestamo
+        )
         .filter(Prestamo.estado == "activo")
         .scalar()
     )
 
     # 4. Total prestado
     total_prestado_periodo = (
-        db.query(func.coalesce(func.sum(Prestamo.monto_total), 0.0)).scalar()
+        aplicar_filtro_usuario(
+            db.query(func.coalesce(func.sum(Prestamo.monto_total), 0.0)), Prestamo
+        ).scalar()
     )
 
     # 5. Ganancia neta (interés recaudado, excluyendo pagos devueltos)
     ganancia_neta = (
-        db.query(func.coalesce(func.sum(Pago.interes_pagado), 0.0))
+        aplicar_filtro_usuario(
+            db.query(func.coalesce(func.sum(Pago.interes_pagado), 0.0)), Pago
+        )
         .filter(Pago.estado_pago != "devuelto")
         .scalar()
     )
 
-    # 6. Mora acumulada (Detecta automáticamente el atributo disponible en Mora o Cuotas)
-    if hasattr(Mora, "monto"):
-        columna_mora = Mora.monto
-    elif hasattr(Mora, "valor"):
-        columna_mora = Mora.valor
-    elif hasattr(Mora, "monto_mora"):
-        columna_mora = Mora.monto_mora
-    else:
-        columna_mora = None
-
-    if columna_mora is not None:
-        mora_acumulada = db.query(
-            func.coalesce(func.sum(columna_mora), 0.0)
+    # 6. Mora histórica registrada (registros Mora de la cartera del usuario)
+    mora_acumulada = (
+        aplicar_filtro_usuario(
+            db.query(func.coalesce(func.sum(Mora.valor), 0.0)), Mora
         ).scalar()
-    else:
-        # Fallback a las cuotas si el modelo Mora no define el valor
-        mora_acumulada = (
-            db.query(
-                func.coalesce(func.sum(PrestamoCuota.mora_acumulada), 0.0)
-            ).scalar()
-            if hasattr(PrestamoCuota, "mora_acumulada")
-            else 0.0
-        )
+    )
 
-    # 7. Indicadores de cobranza y mora (RF-058)
+    # 7. Indicadores de cobranza y mora (RF-058) — calculados en TIEMPO REAL
     hoy = date.today()
 
     # Monto vencido: cuotas vencidas o parciales cuyo vencimiento ya pasó
     monto_vencido = (
-        db.query(func.coalesce(func.sum(PrestamoCuota.valor_cuota), 0.0))
+        _cuotas(db)
         .filter(
             PrestamoCuota.estado.in_(["vencido", "parcial"]),
             PrestamoCuota.fecha_vencimiento < hoy,
         )
+        .with_entities(func.coalesce(func.sum(PrestamoCuota.valor_cuota), 0.0))
         .scalar()
     )
 
-    # Mora pendiente: moras en estado generada aún no saldadas
-    mora_pendiente = (
-        db.query(func.coalesce(func.sum(Mora.valor), 0.0))
-        .filter(Mora.estado == "generada")
+    # Mora pendiente: NO depende de que el procesamiento diario haya corrido.
+    # Se recalcula con la configuración vigente del usuario (gracia, porcentaje
+    # o fijo, simple o compuesta) y se resta lo ya cobrado por concepto de mora.
+    vigente = mora_vigente_total(db, hoy=hoy)
+    mora_vigente_total_monto = float(vigente["total"])
+    mora_pagada = (
+        aplicar_filtro_usuario(
+            db.query(func.coalesce(func.sum(Pago.mora_pagada), 0.0)), Pago
+        )
+        .filter(Pago.estado_pago != "devuelto")
         .scalar()
+        or 0.0
     )
+    mora_pendiente = round(max(0.0, mora_vigente_total_monto - float(mora_pagada)), 2)
 
     # Cobro del día: pagos registrados hoy, sin contar devoluciones
     cobro_del_dia = (
-        db.query(func.coalesce(func.sum(Pago.valor_pagado), 0.0))
+        aplicar_filtro_usuario(
+            db.query(func.coalesce(func.sum(Pago.valor_pagado), 0.0)), Pago
+        )
         .filter(
             func.date(Pago.fecha_pago) == hoy,
             Pago.estado_pago != "devuelto",
@@ -103,11 +119,16 @@ def obtener_resumen_dashboard(db: Session) -> dict:
 
     # 8. Pérdidas del tablero (RF-059): mismo criterio del reporte de pérdidas
     total_perdidas = (
-        db.query(func.coalesce(func.sum(MovimientoCapital.valor), 0.0))
+        aplicar_filtro_usuario(
+            db.query(func.coalesce(func.sum(MovimientoCapital.valor), 0.0)), MovimientoCapital
+        )
         .filter(MovimientoCapital.tipo_movimiento == "perdida")
         .scalar()
     )
-    cantidad_prestamos_perdidos = db.query(func.count(PrestamoPerdido.id)).scalar() or 0
+    cantidad_prestamos_perdidos = (
+        aplicar_filtro_usuario(db.query(func.count(PrestamoPerdido.id)), PrestamoPerdido).scalar()
+        or 0
+    )
 
     return {
         "capital_actual": float(capital_actual),
@@ -118,7 +139,10 @@ def obtener_resumen_dashboard(db: Session) -> dict:
         "mora_acumulada": float(mora_acumulada),
         "prestamos_por_estado": prestamos_por_estado,
         "monto_vencido": float(monto_vencido),
-        "mora_pendiente": float(mora_pendiente),
+        "mora_pendiente": mora_pendiente,
+        "mora_vigente": mora_vigente_total_monto,
+        "cuotas_con_mora": int(vigente["cuotas_con_mora"]),
+        "parametros_mora": parametros_mora(db),
         "cobro_del_dia": float(cobro_del_dia),
         "total_perdidas": float(total_perdidas),
         "cantidad_prestamos_perdidos": int(cantidad_prestamos_perdidos),

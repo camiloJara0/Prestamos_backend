@@ -1,36 +1,33 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException
-from app.models.models import Mora, PrestamoCuota, Pago, ConfiguracionSistema
+from app.models.models import Mora, Prestamo, PrestamoCuota, Pago
 from app.schemas.mora import MoraCreate, MoraUpdate, MoraOut
 from app.core.context import aplicar_filtro_usuario
 from datetime import date, timedelta
 
 
 def obtener_parametro_config(db: Session, clave: str, default_value: str = "0.0") -> float:
-    """Obtiene un parámetro de configuración del sistema, retorna float"""
-    config = db.query(ConfiguracionSistema).filter(
-        ConfiguracionSistema.clave == clave,
-        ConfiguracionSistema.activo == True
-    ).first()
-    
-    if config:
-        try:
-            return float(config.valor)
-        except ValueError:
-            return float(default_value)
-    return float(default_value)
+    """Obtiene un parámetro de configuración (override del usuario → global), retorna float"""
+    from app.services.configuracion import resolver_parametro
+
+    valor, _origen = resolver_parametro(db, clave, default_value)
+    if valor is None:
+        return float(default_value)
+    try:
+        return float(valor)
+    except ValueError:
+        return float(default_value)
 
 
 def obtener_parametro_texto(db: Session, clave: str, default_value: str = "") -> str:
-    """Obtiene un parámetro de configuración del sistema como texto."""
-    config = db.query(ConfiguracionSistema).filter(
-        ConfiguracionSistema.clave == clave,
-        ConfiguracionSistema.activo == True
-    ).first()
-    if config and config.valor is not None:
-        return str(config.valor).strip()
-    return default_value
+    """Obtiene un parámetro de configuración (override del usuario → global) como texto."""
+    from app.services.configuracion import resolver_parametro
+
+    valor, _origen = resolver_parametro(db, clave, default_value)
+    if valor is None:
+        return default_value
+    return str(valor).strip()
 
 
 def valor_mora_diaria(db: Session, cuota: PrestamoCuota, tasa_forzada: float | None = None) -> float:
@@ -47,6 +44,112 @@ def valor_mora_diaria(db: Session, cuota: PrestamoCuota, tasa_forzada: float | N
         return obtener_parametro_config(db, "mora_valor_fijo", "0.0")
     tasa_diaria = obtener_parametro_config(db, "tasa_mora_diaria", "0.5") / 100
     return cuota.valor_cuota * tasa_diaria
+
+
+def parametros_mora(db: Session) -> dict:
+    """Configuración de mora vigente del usuario (para calcular y mostrar)."""
+    return {
+        # 'porcentaje' (% de la cuota/día) o 'fijo' (monto por día)
+        "modo": (obtener_parametro_texto(db, "mora_tipo", "porcentaje") or "porcentaje").lower(),
+        # 'simple' (lineal) o 'compuesta' (interés sobre interés) — preparado
+        # para futuras ampliaciones.
+        "tipo": (obtener_parametro_texto(db, "mora_tipo_calculo", "simple") or "simple").lower(),
+        "tasa_diaria_pct": obtener_parametro_config(db, "tasa_mora_diaria", "0.5"),
+        "valor_fijo": obtener_parametro_config(db, "mora_valor_fijo", "0.0"),
+        "dias_gracia": int(obtener_parametro_config(db, "dias_gracia_mora", "3")),
+    }
+
+
+def mora_vigente_cuota(
+    db: Session,
+    cuota: PrestamoCuota,
+    hoy: date | None = None,
+    parametros: dict | None = None,
+) -> dict:
+    """Mora acumulada AL DÍA DE HOY de una cuota, sin persistir nada.
+
+    Es el cálculo en tiempo real que se muestra en el formulario de pago, el
+    detalle del préstamo y las métricas. Respeta la configuración del usuario
+    (días de gracia, porcentaje o valor fijo) y está preparada para mora
+    simple o compuesta. No toca la base de datos.
+    """
+    hoy = hoy or date.today()
+    p = parametros or parametros_mora(db)
+    dias_gracia = p["dias_gracia"]
+
+    dias_atraso = 0
+    dias_mora = 0
+    if cuota.estado != "pagado" and cuota.fecha_vencimiento and cuota.fecha_vencimiento < hoy:
+        dias_atraso = (hoy - cuota.fecha_vencimiento).days
+        inicio_mora = cuota.fecha_vencimiento + timedelta(days=dias_gracia)
+        if hoy > inicio_mora:
+            dias_mora = (hoy - inicio_mora).days
+
+    if dias_mora <= 0:
+        valor = 0.0
+        valor_diario = 0.0
+    elif p["modo"] == "fijo":
+        valor_diario = p["valor_fijo"]
+        valor = round(valor_diario * dias_mora, 2)
+    else:
+        base = cuota.valor_cuota or 0.0
+        tasa = p["tasa_diaria_pct"] / 100
+        valor_diario = round(base * tasa, 2)
+        if p["tipo"] == "compuesta":
+            valor = round(base * ((1 + tasa) ** dias_mora - 1), 2)
+        else:
+            valor = round(valor_diario * dias_mora, 2)
+
+    return {
+        "valor": valor,
+        "valor_diario": valor_diario,
+        "dias_atraso": dias_atraso,
+        "dias_mora": dias_mora,
+        "dias_gracia": dias_gracia,
+        "en_gracia": dias_atraso > 0 and dias_mora == 0,
+        "modo": p["modo"],
+        "tipo": p["tipo"],
+        "tasa_diaria_pct": p["tasa_diaria_pct"],
+        "fecha_vencimiento": cuota.fecha_vencimiento,
+    }
+
+
+def mora_vigente_prestamo(
+    db: Session,
+    cuotas: list[PrestamoCuota],
+    hoy: date | None = None,
+) -> dict:
+    """Mora vigente agregada de un conjunto de cuotas (mismo día, misma config)."""
+    hoy = hoy or date.today()
+    p = parametros_mora(db)
+    detalle = [mora_vigente_cuota(db, c, hoy=hoy, parametros=p) for c in cuotas]
+    return {
+        "total": round(sum(m["valor"] for m in detalle), 2),
+        "cuotas_con_mora": sum(1 for m in detalle if m["valor"] > 0),
+        "parametros": p,
+        "hoy": hoy.isoformat(),
+    }
+
+
+def mora_vigente_total(db: Session, hoy: date | None = None) -> dict:
+    """Mora vigente de todas las cuotas vencidas sin pagar (dashboard/reportes).
+
+    Se calcula en tiempo real con la configuración vigente, por lo que no
+    depende de que el procesamiento diario haya corrido.
+    """
+    hoy = hoy or date.today()
+    cuotas = (
+        aplicar_filtro_usuario(
+            db.query(PrestamoCuota).join(Prestamo, PrestamoCuota.prestamo_id == Prestamo.id),
+            Prestamo,
+        )
+        .filter(
+            PrestamoCuota.estado.in_(["pendiente", "vencido", "parcial"]),
+            PrestamoCuota.fecha_vencimiento < hoy,
+        )
+        .all()
+    )
+    return mora_vigente_prestamo(db, cuotas, hoy=hoy)
 
 
 def get_moras(db: Session, page: int = 1, limit: int = 10):
@@ -129,14 +232,11 @@ def delete_mora(db: Session, mora_id: int, usuario_id=None, ip_address: str | No
 
 def calcular_mora(db: Session, cuota: PrestamoCuota, pago: Pago = None, tasa_forzada: float | None = None) -> Mora | None:
     """
-    Calcula mora para una cuota usando parámetros de ConfiguracionSistema.
-    - tasa_mora_diaria: porcentaje diario de mora
-    - dias_gracia_mora: días de gracia antes de aplicar mora
+    Persiste la mora de una cuota. El VALOR se obtiene con el mismo cálculo en
+    vivo que muestran el formulario de pago, el detalle y las métricas
+    (mora_vigente_cuota), de forma que lo registrado nunca diverge de lo
+    mostrado. Respeta días de gracia, modo porcentaje/fijo y simple/compuesta.
     """
-    
-    # Obtener parámetros del sistema
-    dias_gracia = int(obtener_parametro_config(db, "dias_gracia_mora", "3"))
-    
     # Si cuota está pagada, no hay mora
     if cuota.estado == "pagado":
         return None
@@ -145,19 +245,21 @@ def calcular_mora(db: Session, cuota: PrestamoCuota, pago: Pago = None, tasa_for
     if cuota.fecha_vencimiento >= date.today():
         return None
     
-    # Calcular días de atraso considerando días de gracia
-    fecha_inicio_mora = cuota.fecha_vencimiento + timedelta(days=dias_gracia)
-    if date.today() <= fecha_inicio_mora:
-        return None  # Aún estamos dentro del período de gracia
-    
-    dias_atraso = (date.today() - fecha_inicio_mora).days
-    
     # Caso especial: cuota parcial pero intereses ya cubiertos
     if cuota.estado == "parcial" and pago and pago.interes_pagado == cuota.interes:
         return None
-    
-    # Calcular valor de mora (modo porcentaje o valor fijo)
-    valor_mora = valor_mora_diaria(db, cuota, tasa_forzada=tasa_forzada) * dias_atraso
+
+    vigente = mora_vigente_cuota(db, cuota)
+    if tasa_forzada is not None and vigente["dias_mora"] > 0:
+        # Tasa alternativa forzada (procesamiento manual): sólo modo porcentaje.
+        vigente["valor"] = round(cuota.valor_cuota * (tasa_forzada / 100) * vigente["dias_mora"], 2)
+
+    # Aún en gracia o sin atraso: no se registra mora
+    if vigente["dias_mora"] <= 0 or vigente["valor"] <= 0:
+        return None
+
+    valor_mora = vigente["valor"]
+    dias_atraso = vigente["dias_atraso"]
     
     # Buscar si ya existe una mora registrada para esta cuota
     mora_existente = (

@@ -5,11 +5,12 @@ from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 
 from app.db.database import SessionLocal
+from app.core.context import aplicar_filtro_usuario
 from app.dependencies.auth import get_current_user, require_rol
 from app.models import IdempotencyKey, PrestamoCuota, Prestamo, Cliente, Pago, Usuario
 from app.schemas.pago import PagoCreate, PagoOut, PagoDevolucionCreate, PagoHistorialOut
 from app.schemas.pagination import PaginatedResponse
-from app.services.pago import get_pagos, registrar_pago, devolver_pago
+from app.services.pago import get_pagos, registrar_pago, devolver_pago, resumen_deuda_cuota
 from app.utils.pdf_generator import generar_recibo_pdf_bytes
 
 router = APIRouter(prefix="/pagos", tags=["Pagos"])
@@ -108,6 +109,35 @@ def listar_pagos(
     )
 
 
+@router.get("/deuda", summary="Deuda vigente de una cuota (tiempo real)")
+def resumen_deuda(
+    cuota_id: int = Query(..., description="Cuota a evaluar"),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Deuda al día de hoy de una cuota: capital pendiente, interés corriente,
+    mora acumulada y total a pagar.
+
+    La mora se calcula en tiempo real con la configuración personalizada del
+    usuario (días de gracia, porcentaje o valor fijo, simple o compuesta) y no
+    requiere que el procesamiento diario haya corrido.
+    """
+    cuota = db.query(PrestamoCuota).filter(PrestamoCuota.id == cuota_id).first()
+    if not cuota:
+        raise HTTPException(status_code=404, detail="La cuota especificada no existe.")
+    prestamo = (
+        aplicar_filtro_usuario(db.query(Prestamo), Prestamo)
+        .filter(Prestamo.id == cuota.prestamo_id)
+        .first()
+    )
+    if not prestamo:
+        raise HTTPException(
+            status_code=404,
+            detail="El préstamo de esta cuota no existe o no está disponible.",
+        )
+    return resumen_deuda_cuota(db, cuota)
+
+
 @router.get("/{pago_id}", response_model=PagoOut)
 def obtener_pago(
     pago_id: int,
@@ -117,7 +147,7 @@ def obtener_pago(
     """
     Obtiene los detalles de un pago específico por su ID.
     """
-    pago = db.query(Pago).filter(Pago.id == pago_id).first()
+    pago = aplicar_filtro_usuario(db.query(Pago), Pago).filter(Pago.id == pago_id).first()
     if not pago:
         raise HTTPException(status_code=404, detail="El pago especificado no existe.")
     return pago
@@ -214,6 +244,13 @@ def descargar_recibo_cuota_pdf(
     cuota = db.query(PrestamoCuota).filter(PrestamoCuota.id == cuota_id).first()
     if not cuota:
         raise HTTPException(status_code=404, detail="La cuota no existe.")
+    prestamo = (
+        aplicar_filtro_usuario(db.query(Prestamo), Prestamo)
+        .filter(Prestamo.id == cuota.prestamo_id)
+        .first()
+    )
+    if not prestamo:
+        raise HTTPException(status_code=404, detail="El préstamo de esta cuota no existe o no está disponible.")
 
     pago_registro = db.query(Pago).filter(Pago.cuota_id == cuota.id).order_by(Pago.id.desc()).first()
     return _responder_pdf(_construir_datos_recibo(db, cuota, pago_registro))
@@ -229,7 +266,7 @@ def descargar_comprobante_pago(
     Comprobante PDF de un pago específico, con su desglose de capital, interés y mora (RF-043).
     Si el pago fue devuelto, el documento incluye la marca de anulación y su motivo.
     """
-    pago_registro = db.query(Pago).filter(Pago.id == pago_id).first()
+    pago_registro = aplicar_filtro_usuario(db.query(Pago), Pago).filter(Pago.id == pago_id).first()
     if not pago_registro:
         raise HTTPException(status_code=404, detail="El pago especificado no existe.")
 

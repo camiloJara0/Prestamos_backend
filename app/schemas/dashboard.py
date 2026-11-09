@@ -1,3 +1,5 @@
+from typing import Optional
+
 from pydantic import BaseModel
 
 
@@ -20,6 +22,9 @@ class DashboardResumenOut(BaseModel):
     # Indicadores de cobranza y mora (RF-058)
     monto_vencido: float = 0.0
     mora_pendiente: float = 0.0
+    mora_vigente: float = 0.0  # mora acumulada al día de hoy (tiempo real)
+    cuotas_con_mora: int = 0
+    parametros_mora: Optional[dict] = None  # gracia/tasa/modo vigentes
     cobro_del_dia: float = 0.0
 
     # Indicadores de pérdidas (RF-059)

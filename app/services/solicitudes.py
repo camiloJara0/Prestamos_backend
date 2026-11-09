@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.context import aplicar_filtro_usuario
 from app.models.models import Cliente, ConfiguracionSistema, Contrato, SolicitudPrestamo, TipoPrestamo, Usuario
 from app.schemas.prestamo import PrestamoCreate
 from app.schemas.solicitud import DecisionCreate, SolicitudCreate, SolicitudPublicaCreate
@@ -36,13 +37,14 @@ def _firma_requerida(db: Session) -> bool:
 
 
 def crear_solicitud(db: Session, datos: SolicitudCreate, usuario_id: int, ip_address: str | None = None):
-    cliente = db.query(Cliente).filter(Cliente.id == datos.cliente_id).first()
+    # Solo se puede solicitar sobre clientes y tipos propios (o de cualquiera si es admin).
+    cliente = aplicar_filtro_usuario(db.query(Cliente), Cliente).filter(Cliente.id == datos.cliente_id).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     if cliente.estado != "activo":
         raise HTTPException(status_code=400, detail="El cliente está bloqueado: la solicitud no puede registrarse")
 
-    tipo = db.query(TipoPrestamo).filter(TipoPrestamo.id == datos.tipo_prestamo_id).first()
+    tipo = aplicar_filtro_usuario(db.query(TipoPrestamo), TipoPrestamo).filter(TipoPrestamo.id == datos.tipo_prestamo_id).first()
     if not tipo or tipo.estado != "activo":
         raise HTTPException(status_code=404, detail="Tipo de préstamo no encontrado o inactivo")
 
@@ -228,11 +230,14 @@ def get_solicitudes(
     estado: str | None = None,
     cliente_id: int | None = None,
 ):
-    query = db.query(SolicitudPrestamo).options(
-        selectinload(SolicitudPrestamo.cliente),
-        selectinload(SolicitudPrestamo.tipo_prestamo),
-        selectinload(SolicitudPrestamo.creador),
-        selectinload(SolicitudPrestamo.evaluador),
+    query = aplicar_filtro_usuario(
+        db.query(SolicitudPrestamo).options(
+            selectinload(SolicitudPrestamo.cliente),
+            selectinload(SolicitudPrestamo.tipo_prestamo),
+            selectinload(SolicitudPrestamo.creador),
+            selectinload(SolicitudPrestamo.evaluador),
+        ),
+        SolicitudPrestamo,
     )
     if estado:
         query = query.filter(SolicitudPrestamo.estado == estado)
@@ -244,7 +249,7 @@ def get_solicitudes(
 
 def get_solicitud(db: Session, solicitud_id: int) -> SolicitudPrestamo:
     solicitud = (
-        db.query(SolicitudPrestamo)
+        aplicar_filtro_usuario(db.query(SolicitudPrestamo), SolicitudPrestamo)
         .options(
             selectinload(SolicitudPrestamo.cliente),
             selectinload(SolicitudPrestamo.tipo_prestamo),

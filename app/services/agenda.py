@@ -7,6 +7,7 @@ from typing import Optional
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.context import aplicar_filtro_usuario
 from app.models.models import Cliente, EventoAgenda, Prestamo, PrestamoCuota, TipoCita
 from app.schemas.agenda import (
     EventoAgendaCreate,
@@ -41,11 +42,12 @@ def _out(evento: EventoAgenda) -> EventoAgendaOut:
 
 
 def _validar_vinculos(db: Session, cliente_id, prestamo_id, tipo_cita_id) -> None:
-    if cliente_id and not db.query(Cliente).filter(Cliente.id == cliente_id).first():
+    # Solo se pueden vincular registros propios (o de cualquiera si es admin).
+    if cliente_id and not aplicar_filtro_usuario(db.query(Cliente), Cliente).filter(Cliente.id == cliente_id).first():
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
-    if prestamo_id and not db.query(Prestamo).filter(Prestamo.id == prestamo_id).first():
+    if prestamo_id and not aplicar_filtro_usuario(db.query(Prestamo), Prestamo).filter(Prestamo.id == prestamo_id).first():
         raise HTTPException(status_code=404, detail="Préstamo no encontrado")
-    if tipo_cita_id and not db.query(TipoCita).filter(TipoCita.id == tipo_cita_id).first():
+    if tipo_cita_id and not aplicar_filtro_usuario(db.query(TipoCita), TipoCita).filter(TipoCita.id == tipo_cita_id).first():
         raise HTTPException(status_code=404, detail="Tipo de cita no encontrado")
 
 
@@ -57,7 +59,9 @@ def get_eventos(
     estado: Optional[str] = None,
 ) -> list[EventoAgendaOut]:
     """CA-R5-1: eventos filtrables por rango de fecha, tipo y estado."""
-    query = db.query(EventoAgenda).options(joinedload(EventoAgenda.cliente))
+    query = aplicar_filtro_usuario(
+        db.query(EventoAgenda).options(joinedload(EventoAgenda.cliente)), EventoAgenda
+    )
     if fecha_desde:
         query = query.filter(EventoAgenda.fecha >= fecha_desde)
     if fecha_hasta:
@@ -72,7 +76,7 @@ def get_eventos(
 
 def get_evento(db: Session, evento_id: int) -> EventoAgenda:
     evento = (
-        db.query(EventoAgenda)
+        aplicar_filtro_usuario(db.query(EventoAgenda), EventoAgenda)
         .options(joinedload(EventoAgenda.cliente))
         .filter(EventoAgenda.id == evento_id)
         .first()
@@ -129,14 +133,14 @@ def cambiar_estado_evento(db: Session, evento_id: int, estado: str) -> EventoAge
 
 
 def get_tipos_cita(db: Session, estado: Optional[str] = None) -> list[TipoCita]:
-    query = db.query(TipoCita)
+    query = aplicar_filtro_usuario(db.query(TipoCita), TipoCita)
     if estado:
         query = query.filter(TipoCita.estado == estado)
     return query.order_by(TipoCita.nombre.asc()).all()
 
 
 def _get_tipo_cita(db: Session, tipo_cita_id: int) -> TipoCita:
-    tipo = db.query(TipoCita).filter(TipoCita.id == tipo_cita_id).first()
+    tipo = aplicar_filtro_usuario(db.query(TipoCita), TipoCita).filter(TipoCita.id == tipo_cita_id).first()
     if not tipo:
         raise HTTPException(status_code=404, detail="Tipo de cita no encontrado")
     return tipo
@@ -177,7 +181,7 @@ def resumen_agenda(db: Session, fecha: Optional[date] = None, mes: Optional[str]
     mes = mes or fecha.strftime("%Y-%m")
 
     eventos_dia = (
-        db.query(EventoAgenda)
+        aplicar_filtro_usuario(db.query(EventoAgenda), EventoAgenda)
         .options(joinedload(EventoAgenda.cliente))
         .filter(EventoAgenda.fecha == fecha)
         .order_by(EventoAgenda.hora_inicio.asc(), EventoAgenda.id.asc())
@@ -188,7 +192,7 @@ def resumen_agenda(db: Session, fecha: Optional[date] = None, mes: Optional[str]
     from sqlalchemy import func as sa_func
 
     total_mes = (
-        db.query(sa_func.count(EventoAgenda.id))
+        aplicar_filtro_usuario(db.query(sa_func.count(EventoAgenda.id)), EventoAgenda)
         .filter(
             sa_func.extract("year", EventoAgenda.fecha) == anio,
             sa_func.extract("month", EventoAgenda.fecha) == num_mes,
@@ -210,7 +214,7 @@ def generar_eventos_cuota(db: Session, prestamo_id: int) -> dict:
     """CA-R5-4: crea un evento cuota_vence por cada cuota; idempotente por
     (prestamo_id, fecha, tipo) — repetir la llamada no duplica eventos."""
     prestamo = (
-        db.query(Prestamo)
+        aplicar_filtro_usuario(db.query(Prestamo), Prestamo)
         .options(joinedload(Prestamo.cuotas), joinedload(Prestamo.cliente))
         .filter(Prestamo.id == prestamo_id)
         .first()

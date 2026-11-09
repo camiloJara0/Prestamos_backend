@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db.database import SessionLocal
+from app.core.context import aplicar_filtro_usuario
 from app.models import PrestamoCuota, Prestamo, Cliente, Pago
 from app.schemas.conciliacion import ConciliacionResumenResponse, ResultadoItemConciliacion
 from app.dependencies.auth import get_current_user
@@ -104,11 +105,14 @@ async def procesar_extracto_bancario(
             detail=f"Error al parsear el archivo {file.filename}: {str(e)}"
         )
 
-    # Cargar cuotas pendientes con sus relaciones
+    # Cargar cuotas pendientes con sus relaciones (solo las propias del usuario)
     cuotas_pendientes = (
-        db.query(PrestamoCuota, Prestamo, Cliente)
-        .join(Prestamo, PrestamoCuota.prestamo_id == Prestamo.id)
-        .join(Cliente, Prestamo.cliente_id == Cliente.id)
+        aplicar_filtro_usuario(
+            db.query(PrestamoCuota, Prestamo, Cliente)
+            .join(Prestamo, PrestamoCuota.prestamo_id == Prestamo.id)
+            .join(Cliente, Prestamo.cliente_id == Cliente.id),
+            Prestamo,
+        )
         .filter(PrestamoCuota.estado == "pendiente")
         .all()
     )

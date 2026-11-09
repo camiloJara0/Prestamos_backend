@@ -4,6 +4,7 @@ import pdfplumber
 import pandas as pd
 from sqlalchemy.orm import Session
 
+from app.core.context import aplicar_filtro_usuario
 from app.models import PrestamoCuota, Cliente, Prestamo
 from app.schemas.pago import PagoCreate
 from app.services.pago import registrar_pago
@@ -64,7 +65,15 @@ def procesar_extracto_bancario(contenido: bytes, nombre_archivo: str, db: Sessio
 
     # 2. Iterar sobre cada referencia detectada y cruzar con la BD
     for ref in referencias_encontradas:
-        cuota = db.query(PrestamoCuota).filter(PrestamoCuota.referencia_pago == ref).first()
+        # Solo se pueden liquidar cuotas de préstamos propios del usuario.
+        cuota = (
+            aplicar_filtro_usuario(
+                db.query(PrestamoCuota).join(Prestamo, PrestamoCuota.prestamo_id == Prestamo.id),
+                Prestamo,
+            )
+            .filter(PrestamoCuota.referencia_pago == ref)
+            .first()
+        )
 
         if not cuota:
             no_encontrados.append(ref)
@@ -80,7 +89,10 @@ def procesar_extracto_bancario(contenido: bytes, nombre_archivo: str, db: Sessio
             continue
 
         # 3. Si está PENDIENTE, registrar el pago automáticamente
-        prestamo = db.query(Prestamo).filter(Prestamo.id == cuota.prestamo_id).first()
+        prestamo = aplicar_filtro_usuario(db.query(Prestamo), Prestamo).filter(Prestamo.id == cuota.prestamo_id).first()
+        if not prestamo:
+            no_encontrados.append(ref)
+            continue
         
         pago_schema = PagoCreate(
             prestamo_id=cuota.prestamo_id,

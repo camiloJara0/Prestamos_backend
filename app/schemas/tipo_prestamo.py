@@ -41,6 +41,9 @@ class TipoPrestamoUpdate(TipoPrestamoBase):
 
 class TipoPrestamoOut(TipoPrestamoBase):
     id: int
+    # En BD puede quedar sin descripción (columna nullable): el detalle del
+    # préstamo debe poder serializarse igual.
+    descripcion: Optional[str] = None
 
     class Config:
         from_attributes = True

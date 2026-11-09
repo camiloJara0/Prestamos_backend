@@ -2,6 +2,7 @@ import json
 from datetime import datetime
 from typing import Optional, Union
 from sqlalchemy.orm import Session
+from app.core.context import aplicar_filtro_usuario
 from app.models.models import Auditoria, Usuario
 
 
@@ -47,8 +48,11 @@ def registrar_auditoria(
 
 
 def get_auditorias(db: Session, page: int = 1, limit: int = 10):
-    """Obtiene todas las entradas de auditoría con respuesta paginada (B11)."""
-    query = db.query(Auditoria)
+    """Obtiene todas las entradas de auditoría con respuesta paginada (B11).
+
+    Cada usuario solo ve su propia traza (el admin ve la completa).
+    """
+    query = aplicar_filtro_usuario(db.query(Auditoria), Auditoria)
     total = query.count()
     offset = (page - 1) * limit
     items = query.order_by(Auditoria.fecha.desc()).offset(offset).limit(limit).all()
@@ -67,7 +71,7 @@ def get_auditorias_por_usuario(
     db: Session, usuario_id: int, page: int = 1, limit: int = 10
 ):
     """Obtiene auditorias de un usuario específico."""
-    query = db.query(Auditoria).filter(Auditoria.usuario_id == usuario_id)
+    query = aplicar_filtro_usuario(db.query(Auditoria), Auditoria).filter(Auditoria.usuario_id == usuario_id)
     total = query.count()
     offset = (page - 1) * limit
     items = query.order_by(Auditoria.fecha.desc()).offset(offset).limit(limit).all()
@@ -86,7 +90,7 @@ def get_auditorias_por_tabla(
     db: Session, tabla_afectada: str, page: int = 1, limit: int = 10
 ):
     """Obtiene auditorias de una tabla específica."""
-    query = db.query(Auditoria).filter(Auditoria.tabla_afectada == tabla_afectada)
+    query = aplicar_filtro_usuario(db.query(Auditoria), Auditoria).filter(Auditoria.tabla_afectada == tabla_afectada)
     total = query.count()
     offset = (page - 1) * limit
     items = query.order_by(Auditoria.fecha.desc()).offset(offset).limit(limit).all()
@@ -105,7 +109,7 @@ def get_auditorias_por_operacion(
     db: Session, tipo_operacion: str, page: int = 1, limit: int = 10
 ):
     """Obtiene auditorias de un tipo de operación específico."""
-    query = db.query(Auditoria).filter(Auditoria.tipo_operacion == tipo_operacion)
+    query = aplicar_filtro_usuario(db.query(Auditoria), Auditoria).filter(Auditoria.tipo_operacion == tipo_operacion)
     total = query.count()
     offset = (page - 1) * limit
     items = query.order_by(Auditoria.fecha.desc()).offset(offset).limit(limit).all()

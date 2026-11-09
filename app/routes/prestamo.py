@@ -64,7 +64,29 @@ def obtener(prestamo_id: int, db: Session = Depends(get_db), current_user: dict 
     db_prestamo = obtener_prestamo(db, prestamo_id)
     if not db_prestamo:
         raise HTTPException(status_code=404, detail="Prestamo no encontrado")
+    from app.services.pago import resumen_deuda_prestamo
+
+    db_prestamo.mora_vigente = resumen_deuda_prestamo(db, db_prestamo)
     return db_prestamo
+
+
+@router.get("/{prestamo_id}/deuda", summary="Deuda vigente de un préstamo (tiempo real)")
+def deuda_vigente(
+    prestamo_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Mora vigente, cuotas vencidas y parámetros aplicados del préstamo.
+
+    Se recalcula en cada consulta con la configuración del usuario (para
+    refresco en tiempo real del detalle y las métricas).
+    """
+    db_prestamo = obtener_prestamo(db, prestamo_id)
+    if not db_prestamo:
+        raise HTTPException(status_code=404, detail="Prestamo no encontrado")
+    from app.services.pago import resumen_deuda_prestamo
+
+    return resumen_deuda_prestamo(db, db_prestamo)
 
 @router.post("/{prestamo_id}/renovar", response_model=PrestamoOut)
 def renovar(

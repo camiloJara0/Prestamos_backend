@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import extract, func
 from typing import Optional
+from app.core.context import aplicar_filtro_usuario
 from app.models.models import MovimientoCapital, Prestamo, PrestamoPerdido, Pago, PrestamoCuota, Cliente, TipoPago
 from datetime import date, timedelta
 from io import BytesIO
@@ -15,6 +16,8 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
 
 def _filtrar_movimientos(query, desde, hasta):
+    # Cada reporte solo ve los movimientos del usuario actual (admin: todos).
+    query = aplicar_filtro_usuario(query, MovimientoCapital)
     if desde:
         query = query.filter(MovimientoCapital.fecha >= desde)
     if hasta:
@@ -22,6 +25,7 @@ def _filtrar_movimientos(query, desde, hasta):
     return query
 
 def _filtrar_pagos(query, desde, hasta):
+    query = aplicar_filtro_usuario(query, Pago)
     if desde:
         query = query.filter(Pago.fecha_pago >= desde)
     if hasta:
@@ -29,11 +33,17 @@ def _filtrar_pagos(query, desde, hasta):
     return query
 
 def _filtrar_perdidos(query, desde, hasta):
+    query = aplicar_filtro_usuario(query, PrestamoPerdido)
     if desde:
         query = query.filter(PrestamoPerdido.fecha >= desde)
     if hasta:
         query = query.filter(PrestamoPerdido.fecha <= hasta)
     return query
+
+
+def _cuotas_propias(query):
+    """Cuotas visibles: se ven por el dueño del préstamo (PrestamoCuota no tiene usuario_id)."""
+    return aplicar_filtro_usuario(query, Prestamo)
 
 def _label_periodo(desde, hasta):
     if desde and hasta:
@@ -103,20 +113,20 @@ def get_reporte_cobranza(db: Session, desde: Optional[date] = None, hasta: Optio
     fecha_inicio_por_vencer = today
     fecha_fin_por_vencer = today + timedelta(days=7)
     
-    cuotas_por_vencer = db.query(PrestamoCuota).join(Prestamo).join(Cliente).filter(
+    cuotas_por_vencer = _cuotas_propias(db.query(PrestamoCuota).join(Prestamo).join(Cliente)).filter(
         PrestamoCuota.estado.in_(["pendiente", "parcial"]),
         PrestamoCuota.fecha_vencimiento >= fecha_inicio_por_vencer,
         PrestamoCuota.fecha_vencimiento <= fecha_fin_por_vencer
     ).all()
     
     # Cuotas vencidas (sin pagar, vencidas hace más de 0 días)
-    cuotas_vencidas = db.query(PrestamoCuota).join(Prestamo).join(Cliente).filter(
+    cuotas_vencidas = _cuotas_propias(db.query(PrestamoCuota).join(Prestamo).join(Cliente)).filter(
         PrestamoCuota.estado.in_(["vencido", "parcial"]),
         PrestamoCuota.fecha_vencimiento < today
     ).all()
     
     # Cuotas pagadas
-    query_pagadas = db.query(PrestamoCuota).join(Prestamo).join(Cliente).filter(
+    query_pagadas = _cuotas_propias(db.query(PrestamoCuota).join(Prestamo).join(Cliente)).filter(
         PrestamoCuota.estado == "pagado"
     )
     if desde:
@@ -137,14 +147,17 @@ def get_reporte_cobranza(db: Session, desde: Optional[date] = None, hasta: Optio
     # Monto pagado sobre cada cuota vencida para conocer su saldo real (RF-047)
     ids_vencidas = [c.id for c in cuotas_vencidas]
     pagado_por_cuota = dict(
-        db.query(Pago.cuota_id, func.coalesce(func.sum(Pago.capital_pagado + Pago.interes_pagado), 0.0))
+        aplicar_filtro_usuario(
+            db.query(Pago.cuota_id, func.coalesce(func.sum(Pago.capital_pagado + Pago.interes_pagado), 0.0)),
+            Pago,
+        )
         .filter(Pago.cuota_id.in_(ids_vencidas))
         .group_by(Pago.cuota_id)
         .all()
     ) if ids_vencidas else {}
 
     # Lo cobrado en el periodo con su desglose, solo pagos confirmados (RF-054)
-    query_cobros = db.query(Pago).filter(Pago.estado_pago != "devuelto")
+    query_cobros = aplicar_filtro_usuario(db.query(Pago), Pago).filter(Pago.estado_pago != "devuelto")
     if desde:
         query_cobros = query_cobros.filter(func.date(Pago.fecha_pago) >= desde)
     if hasta:
@@ -170,6 +183,9 @@ def get_reporte_cobranza(db: Session, desde: Optional[date] = None, hasta: Optio
         fila["mora"] = round(fila["mora"] + p.mora_pagada, 2)
         fila["total"] = round(fila["total"] + p.valor_pagado, 2)
 
+    from app.services.mora import mora_vigente_cuota, parametros_mora
+
+    params_mora = parametros_mora(db)
     nota = None
     if not cobros_periodo:
         nota = "Sin cobros registrados en el periodo seleccionado."
@@ -207,7 +223,9 @@ def get_reporte_cobranza(db: Session, desde: Optional[date] = None, hasta: Optio
                 "valor_cuota": c.valor_cuota,
                 "estado": c.estado,
                 "dias_atraso": (today - c.fecha_vencimiento).days,
-                "mora": float(c.mora or 0.0),
+                # Mora en tiempo real (misma configuración que el formulario de pago)
+                "mora": mora_vigente_cuota(db, c, hoy=today, parametros=params_mora)["valor"],
+                "mora_registrada": float(c.mora or 0.0),
                 "saldo": max(float(c.valor_cuota) - float(pagado_por_cuota.get(c.id, 0.0)), 0.0)
             } for c in cuotas_vencidas
         ],
@@ -228,7 +246,7 @@ def get_reporte_cobranza(db: Session, desde: Optional[date] = None, hasta: Optio
 def get_reporte_cartera(db: Session, desde: Optional[date] = None, hasta: Optional[date] = None):
     """Estado de la cartera: saldos por préstamo, antigüedad y distribución por estado (RF-053)."""
 
-    query = db.query(Prestamo)
+    query = aplicar_filtro_usuario(db.query(Prestamo), Prestamo)
     if desde:
         query = query.filter(Prestamo.fecha_prestamo >= desde)
     if hasta:
@@ -315,7 +333,7 @@ def get_reporte_pagos(db: Session, desde: Optional[date] = None, hasta: Optional
     """RF-077: pagos del periodo agrupados por método de pago para conciliar la caja por canal."""
 
     def _filtros(query):
-        query = query.filter(Pago.estado_pago != "devuelto")
+        query = aplicar_filtro_usuario(query, Pago).filter(Pago.estado_pago != "devuelto")
         if desde:
             query = query.filter(func.date(Pago.fecha_pago) >= desde)
         if hasta:
@@ -361,7 +379,9 @@ def get_reporte_pagos(db: Session, desde: Optional[date] = None, hasta: Optional
     }
 
     # Pagos devueltos en el periodo: identificados aparte para no des cuadrar la caja
-    query_dev = db.query(func.count(Pago.id), func.coalesce(func.sum(Pago.valor_pagado), 0.0)).filter(Pago.estado_pago == "devuelto")
+    query_dev = aplicar_filtro_usuario(
+        db.query(func.count(Pago.id), func.coalesce(func.sum(Pago.valor_pagado), 0.0)), Pago
+    ).filter(Pago.estado_pago == "devuelto")
     if desde:
         query_dev = query_dev.filter(func.date(Pago.fecha_pago) >= desde)
     if hasta:
@@ -372,7 +392,9 @@ def get_reporte_pagos(db: Session, desde: Optional[date] = None, hasta: Optional
     devueltos = {"cantidad": cantidad_devueltos or 0, "total": round(total_devueltos or 0.0, 2)}
 
     filas_detalle = (
-        db.query(Pago, TipoPago.nombre, Cliente.nombre, PrestamoCuota.numero_cuota)
+        aplicar_filtro_usuario(
+            db.query(Pago, TipoPago.nombre, Cliente.nombre, PrestamoCuota.numero_cuota), Pago
+        )
         .join(TipoPago, Pago.tipo_pago_id == TipoPago.id, isouter=True)
         .join(Cliente, Pago.cliente_id == Cliente.id, isouter=True)
         .join(PrestamoCuota, Pago.cuota_id == PrestamoCuota.id, isouter=True)

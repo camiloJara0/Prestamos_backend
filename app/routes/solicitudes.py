@@ -3,6 +3,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.dependencies.auth import get_current_user, get_db, get_usuario_id, require_rol
+from app.core.context import aplicar_filtro_usuario
 from app.models.models import Contrato
 from app.schemas.pagination import PaginatedResponse
 from app.schemas.solicitud import (
@@ -134,7 +135,7 @@ def descargar_contrato(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
+    contrato = aplicar_filtro_usuario(db.query(Contrato), Contrato).filter(Contrato.id == contrato_id).first()
     if not contrato:
         raise HTTPException(status_code=404, detail="Contrato no encontrado")
     return FileResponse(

@@ -19,6 +19,7 @@ from reportlab.lib.pagesizes import letter, portrait
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
+from app.core.context import aplicar_filtro_usuario
 from app.models.models import Contrato, SolicitudPrestamo
 
 CONTRATOS_DIR = os.getenv("CONTRATOS_DIR", "contratos_guardados")
@@ -150,7 +151,7 @@ def emitir_contrato(
 
 def firmar_contrato(db, contrato_id: int, firmante_nombre: str, firmante_documento: str) -> Contrato:
     """Firma electrónica del contrato (adaptador piloto)."""
-    contrato = db.query(Contrato).filter(Contrato.id == contrato_id).first()
+    contrato = aplicar_filtro_usuario(db.query(Contrato), Contrato).filter(Contrato.id == contrato_id).first()
     if not contrato:
         raise HTTPException(status_code=404, detail="Contrato no encontrado")
     if contrato.estado == "firmado":
@@ -182,7 +183,7 @@ def firmar_contrato(db, contrato_id: int, firmante_nombre: str, firmante_documen
 
 def obtener_contrato_solicitud(db, solicitud_id: int) -> Contrato:
     contrato = (
-        db.query(Contrato)
+        aplicar_filtro_usuario(db.query(Contrato), Contrato)
         .filter(Contrato.solicitud_id == solicitud_id, Contrato.estado != "rechazado")
         .order_by(Contrato.id.desc())
         .first()

@@ -380,7 +380,10 @@ def get_prestamos(
     fecha_hasta: date = None,
     busqueda: str = None
 ):
-    query = aplicar_filtro_usuario(db.query(Prestamo), Prestamo)
+    query = (
+        aplicar_filtro_usuario(db.query(Prestamo), Prestamo)
+        .join(Cliente)
+    )
     if estado and estado != "todos":
         query = query.filter(Prestamo.estado == estado)
     if cliente_id:

@@ -13,6 +13,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import configure_mappers, relationship
 
@@ -371,6 +372,34 @@ class ConfiguracionSistema(Base):
 
     def __repr__(self):
         return f"<ConfiguracionSistema(clave={self.clave}, valor={self.valor})>"
+
+
+class ConfiguracionUsuario(Base):
+    """Override de parámetro (ej. mora) propio de un usuario.
+
+    La lectura siempre es en cascada: si el usuario autenticado tiene esta
+    clave, se usa su valor; si no, se usa la fila global de
+    `configuracion_sistema`. Esto permite la configuración personalizada
+    por usuario (RF de mora configurable) sin tocar el esquema global.
+    """
+
+    __tablename__ = "configuracion_usuario"
+    __table_args__ = (
+        UniqueConstraint("usuario_id", "clave", name="uq_config_usuario_usuario_clave"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), index=True, nullable=False)
+    clave = Column(String(100), nullable=False, index=True)
+    valor = Column(String(255), nullable=False)
+    descripcion = Column(Text)
+    tipo_valor = Column(String(50), default="string")
+    activo = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<ConfiguracionUsuario(clave={self.clave}, usuario_id={self.usuario_id})>"
 
 
 class Auditoria(Base):

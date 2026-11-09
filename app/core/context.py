@@ -21,12 +21,15 @@ def aplicar_filtro_usuario(query, modelo):
 
     - Admin: ve todos los registros (auditoría global).
     - Usuario normal: solo sus propios registros (los que tienen usuario_id).
+      Los modelos sin usuario_id pero con dueño alternativo (p. ej.
+      SolicitudPrestamo.usuario_creador_id) también quedan cubiertos.
     - Sin contexto (jobs internos, seed): sin filtro.
     """
     uid = usuario_actual_id.get()
     rol = usuario_actual_rol.get()
     if rol == "admin" or not uid:
         return query
-    if hasattr(modelo, "usuario_id"):
-        return query.filter(modelo.usuario_id == uid)
+    columna = getattr(modelo, "usuario_id", None) or getattr(modelo, "usuario_creador_id", None)
+    if columna is not None:
+        return query.filter(columna == uid)
     return query

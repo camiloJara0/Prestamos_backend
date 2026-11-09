@@ -9,7 +9,7 @@ from app.services.configuracion import (
     get_todas_configuraciones,
 )
 from app.services.auditoria import registrar_auditoria
-from app.dependencies.auth import get_current_user, require_rol
+from app.dependencies.auth import get_current_user, get_usuario_id
 
 router = APIRouter(prefix="/configuracion", tags=["Configuración"])
 
@@ -45,8 +45,10 @@ def modificar_configuracion(
     datos: ConfiguracionUpdate,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(require_rol("admin")),
+    current_user: dict = Depends(get_current_user),
 ):
+    # El admin edita el valor global; cualquier usuario autenticado edita su
+    # propio override (la validación y el alcance los resuelve el servicio).
     anterior = get_configuracion_por_clave(db, clave)
     valor_anterior = anterior.valor
     config = actualizar_configuracion(db, clave, datos)
@@ -54,10 +56,10 @@ def modificar_configuracion(
         db,
         tabla_afectada="configuracion_sistema",
         tipo_operacion="UPDATE",
-        usuario_id=current_user.get("sub"),
+        usuario_id=get_usuario_id(current_user),
         registro_id=config.id,
         valores_anteriores={"valor": valor_anterior},
-        valores_nuevos={"valor": config.valor},
+        valores_nuevos={"valor": config.valor, "origen": getattr(config, "origen", "global")},
         descripcion=f"Actualización del parámetro '{clave}'",
         ip_address=request.client.host if request.client else None,
     )

@@ -15,6 +15,7 @@ from urllib.parse import quote_plus
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from app.core.context import aplicar_filtro_usuario
 from app.models.models import Cliente, Prestamo, PrestamoCuota
 from app.schemas.notificacion import RecordatorioCuotaResponse
 from app.services import plantillas as plantillas_service
@@ -36,10 +37,13 @@ def _consulta(db: Session, tipo: str, dias: int):
         )
 
     hoy = date.today()
-    query = (
+    # Los jobs corren sin contexto (ven todo); una llamada con sesión filtrada
+    # solo vería los recordatorios del usuario actual.
+    query = aplicar_filtro_usuario(
         db.query(PrestamoCuota, Prestamo, Cliente)
         .join(Prestamo, PrestamoCuota.prestamo_id == Prestamo.id)
-        .join(Cliente, Prestamo.cliente_id == Cliente.id)
+        .join(Cliente, Prestamo.cliente_id == Cliente.id),
+        Prestamo,
     )
 
     if tipo == "proximos":

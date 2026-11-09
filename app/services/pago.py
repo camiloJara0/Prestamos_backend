@@ -47,6 +47,101 @@ def _validar_pago(db: Session, pago: PagoCreate):
     return cuota, prestamo
 
 
+def _abonos_cuota(db: Session, cuota_id: int) -> dict:
+    """Suma de pagos no devueltos aplicados a una cuota (capital/interés/mora)."""
+    pagos = (
+        db.query(Pago)
+        .filter(Pago.cuota_id == cuota_id, Pago.estado_pago != "devuelto")
+        .all()
+    )
+    return {
+        "capital": round(sum(p.capital_pagado or 0.0 for p in pagos), 2),
+        "interes": round(sum(p.interes_pagado or 0.0 for p in pagos), 2),
+        "mora": round(sum(p.mora_pagada or 0.0 for p in pagos), 2),
+        "total": round(sum(p.valor_pagado or 0.0 for p in pagos), 2),
+        "cantidad": len(pagos),
+    }
+
+
+def resumen_deuda_cuota(db: Session, cuota: PrestamoCuota) -> dict:
+    """Deuda vigente de una cuota al día de hoy (en tiempo real, sin persistir).
+
+    Devuelve lo que el formulario de pago debe mostrar: capital pendiente,
+    interés corriente pendiente, mora acumulada según la configuración del
+    usuario y el total a pagar.
+    """
+    from app.services.mora import mora_vigente_cuota, parametros_mora
+
+    abonos = _abonos_cuota(db, cuota.id)
+    vigente = mora_vigente_cuota(db, cuota)
+
+    capital_pendiente = max(0.0, round((cuota.capital or 0.0) - abonos["capital"], 2))
+    interes_pendiente = max(0.0, round((cuota.interes or 0.0) - abonos["interes"], 2))
+    mora_acumulada = round(vigente["valor"], 2)
+    mora_pendiente = max(0.0, round(mora_acumulada - abonos["mora"], 2))
+    total_a_pagar = round(capital_pendiente + interes_pendiente + mora_pendiente, 2)
+
+    return {
+        "cuota_id": cuota.id,
+        "prestamo_id": cuota.prestamo_id,
+        "numero_cuota": cuota.numero_cuota,
+        "estado": cuota.estado,
+        "fecha_vencimiento": cuota.fecha_vencimiento,
+        "valor_cuota": cuota.valor_cuota,
+        "capital": cuota.capital,
+        "interes": cuota.interes,
+        "capital_pendiente": capital_pendiente,
+        "interes_pendiente": interes_pendiente,
+        "mora_acumulada": mora_acumulada,
+        "mora_pendiente": mora_pendiente,
+        "mora_diaria": vigente["valor_diario"],
+        "dias_atraso": vigente["dias_atraso"],
+        "dias_mora": vigente["dias_mora"],
+        "dias_gracia": vigente["dias_gracia"],
+        "en_gracia": vigente["en_gracia"],
+        "total_a_pagar": total_a_pagar,
+        "abonado": abonos,
+        "parametros_mora": parametros_mora(db),
+        "calculado_en": date.today().isoformat(),
+    }
+
+
+def resumen_deuda_prestamo(db: Session, prestamo) -> dict:
+    """Deuda vigente agregada de un préstamo (todas sus cuotas sin pagar)."""
+    from app.services.mora import mora_vigente_prestamo
+
+    cuotas = (
+        db.query(PrestamoCuota)
+        .filter(
+            PrestamoCuota.prestamo_id == prestamo.id,
+            PrestamoCuota.estado != "pagado",
+        )
+        .all()
+    )
+
+    mora = mora_vigente_prestamo(db, cuotas)
+    hoy = date.today()
+    vencidas = [c for c in cuotas if c.fecha_vencimiento and c.fecha_vencimiento < hoy]
+    abonado_total = 0.0
+    mora_pagada = 0.0
+    for c in cuotas:
+        a = _abonos_cuota(db, c.id)
+        abonado_total += a["total"]
+        mora_pagada += a["mora"]
+
+    return {
+        "prestamo_id": prestamo.id,
+        "mora_vigente": mora["total"],
+        "mora_pagada": round(mora_pagada, 2),
+        "mora_pendiente": round(max(0.0, mora["total"] - mora_pagada), 2),
+        "abonado": round(abonado_total, 2),
+        "cuotas_con_mora": mora["cuotas_con_mora"],
+        "cuotas_vencidas": len(vencidas),
+        "parametros_mora": mora["parametros"],
+        "hoy": mora["hoy"],
+    }
+
+
 def registrar_pago(db: Session, pago: PagoCreate, usuario_id: int, ip_address: str | None = None):
     cuota, prestamo = _validar_pago(db, pago)
 
