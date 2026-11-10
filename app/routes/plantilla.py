@@ -35,7 +35,7 @@ def metricas_envios(
     desde: Optional[date] = Query(None, description="Fecha desde (ej: 2026-08-01)"),
     hasta: Optional[date] = Query(None, description="Fecha hasta (ej: 2026-08-31)"),
     db: Session = Depends(get_db),
-    current_user: dict = Depends(require_rol("admin")),
+    current_user: dict = Depends(require_rol("admin", "prestamista")),
 ):
     """RF-079: totales de envíos por canal, estado y plantilla en el periodo"""
     return plantillas_service.get_metricas_envios(db, desde=desde, hasta=hasta)
@@ -49,7 +49,7 @@ def historial_envios(
     hasta: Optional[date] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    current_user: dict = Depends(require_rol("admin")),
+    current_user: dict = Depends(require_rol("admin", "prestamista")),
 ):
     """RF-079: historial reciente de envíos para auditar la comunicación"""
     return plantillas_service.get_envios(
@@ -71,7 +71,7 @@ def crear_plantilla(
     datos: PlantillaCreate,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(require_rol("admin")),
+    current_user: dict = Depends(require_rol("admin", "prestamista")),
 ):
     plantilla = plantillas_service.crear_plantilla(db, datos)
     registrar_auditoria(
@@ -93,7 +93,7 @@ def actualizar_plantilla(
     datos: PlantillaUpdate,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(require_rol("admin")),
+    current_user: dict = Depends(require_rol("admin", "prestamista")),
 ):
     anterior = plantillas_service.get_plantilla(db, plantilla_id)
     valores_anteriores = {
@@ -127,7 +127,7 @@ def eliminar_plantilla(
     plantilla_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(require_rol("admin")),
+    current_user: dict = Depends(require_rol("admin", "prestamista")),
 ):
     plantilla = plantillas_service.get_plantilla(db, plantilla_id)
     nombre = plantilla.nombre

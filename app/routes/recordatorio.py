@@ -18,7 +18,7 @@ def listar_destinatarios(
     tipo: str = Query(default="proximos"),
     dias: int = Query(default=3, ge=1, le=30),
     db: Session = Depends(get_db),
-    current_user: dict = Depends(require_rol("admin")),
+    current_user: dict = Depends(require_rol("admin", "prestamista")),
 ):
     """Total y detalle de destinatarios antes de enviar el recordatorio."""
     filas = recordatorio_service.destinatarios(db, tipo, dias)
@@ -31,7 +31,7 @@ def previsualizar(
     tipo: str = Query(default="proximos"),
     dias: int = Query(default=3, ge=1, le=30),
     db: Session = Depends(get_db),
-    current_user: dict = Depends(require_rol("admin")),
+    current_user: dict = Depends(require_rol("admin", "prestamista")),
 ):
     """Mensaje compuesto con la plantilla seleccionada, sin enviar."""
     return recordatorio_service.previsualizar(db, plantilla_id, tipo, dias)
@@ -41,7 +41,7 @@ def previsualizar(
 def enviar(
     body: RecordatorioEnvioIn,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(require_rol("admin")),
+    current_user: dict = Depends(require_rol("admin", "prestamista")),
 ):
     """Envío masivo del recordatorio a todos los destinatarios del criterio."""
     return recordatorio_service.enviar(db, body.plantilla_id, body.tipo, body.dias)

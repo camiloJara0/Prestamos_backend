@@ -67,9 +67,15 @@ def get_usuario_id(current_user: dict) -> int:
     )
 
 
-def require_rol(rol_requerido: str):
+def require_rol(*roles: str):
+    """Permite el paso solo a los roles indicados.
+
+    Ejemplos:
+        require_rol("admin")                 -> solo administrador
+        require_rol("admin", "prestamista")  -> equipo y prestamistas
+    """
     def verificar_rol(current_user: dict = Depends(get_current_user)):
-        if current_user.get("rol") != rol_requerido:
+        if current_user.get("rol") not in roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Acceso denegado : no tienes permiso para realizar esta accion"

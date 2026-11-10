@@ -20,9 +20,13 @@ def get_db():
         db.close()
 
 def verificar_admin(current_user: dict):
-    """Verifica que el usuario actual tenga rol de administrador."""
-    if current_user.get("rol") != "admin":
-        raise HTTPException(status_code=403, detail="Solo administradores pueden ver auditoria")
+    """Auditoría disponible para el equipo (admin) y los prestamistas.
+
+    El servicio de auditoría aplica el aislamiento por usuario: el prestamista
+    solo ve su propio historial; el admin ve el historial global.
+    """
+    if current_user.get("rol") not in ("admin", "prestamista"):
+        raise HTTPException(status_code=403, detail="No tienes permiso para ver auditoria")
 
 @router.get("/", response_model=PaginatedResponse[AuditoriaOut])
 def listar_auditorias(

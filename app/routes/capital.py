@@ -27,7 +27,7 @@ def crear_movimiento(
     movimiento: MovimientoCapitalCreate, 
     request: Request,
     db: Session = Depends(get_db), 
-    current_user: dict = Depends(require_rol("admin"))
+    current_user: dict = Depends(require_rol("admin", "prestamista"))
 ):
     return registrar_movimiento(
         db, movimiento,

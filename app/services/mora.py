@@ -320,7 +320,14 @@ def procesar_moras(db: Session, tasa_diaria: float = None):
     Si se proporciona tasa_diaria explícitamente se usa como porcentaje;
     si no, cada cuota lee su modo de mora (porcentaje o fijo) de configuración.
     """
-    cuotas = db.query(PrestamoCuota).filter(PrestamoCuota.estado != "pagado").all()
+    
+    query = db.query(PrestamoCuota).filter(
+        PrestamoCuota.estado != "pagado"
+    )
+    query = aplicar_filtro_usuario(query, PrestamoCuota)
+
+    cuotas = query.all()
+    
     moras_generadas = []
 
     for cuota in cuotas:

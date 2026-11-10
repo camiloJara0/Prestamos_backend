@@ -159,7 +159,7 @@ def solicitar_devolucion_pago(
     datos_devolucion: PagoDevolucionCreate,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(require_rol("admin")),
+    current_user: dict = Depends(require_rol("admin", "prestamista")),
 ):
     """
     Anula/Devuelve un pago previamente registrado dentro del margen máximo de 30 días,

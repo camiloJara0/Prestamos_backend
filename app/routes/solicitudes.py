@@ -86,7 +86,7 @@ def decidir_solicitud(
     datos: DecisionCreate,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(require_rol("admin")),
+    current_user: dict = Depends(require_rol("admin", "prestamista")),
 ):
     """RF-021/RF-024: solo el administrador aprueba o rechaza."""
     solicitud = solicitudes_service.decidir_solicitud(

@@ -16,7 +16,7 @@ def get_db():
         db.close()
 
 @router.post("/", response_model=schemas.TipoPagoOut)
-def crear_tipo_pago(tipo_pago: schemas.TipoPagoCreate, db: Session = Depends(get_db), current_user: dict = Depends(require_rol("admin"))):
+def crear_tipo_pago(tipo_pago: schemas.TipoPagoCreate, db: Session = Depends(get_db), current_user: dict = Depends(require_rol("admin", "prestamista"))):
     return services.create_tipo_pago(db, tipo_pago)
 
 @router.get("/", response_model=PaginatedResponse[schemas.TipoPagoOut])
@@ -36,14 +36,14 @@ def obtener_tipo_pago(tipo_pago_id: int, db: Session = Depends(get_db), current_
     return db_tipo_pago
 
 @router.put("/{tipo_pago_id}", response_model=schemas.TipoPagoOut)
-def actualizar_tipo_pago(tipo_pago_id: int, tipo_pago: schemas.TipoPagoUpdate, db: Session = Depends(get_db), current_user: dict = Depends(require_rol("admin"))):
+def actualizar_tipo_pago(tipo_pago_id: int, tipo_pago: schemas.TipoPagoUpdate, db: Session = Depends(get_db), current_user: dict = Depends(require_rol("admin", "prestamista"))):
     db_tipo_pago = services.update_tipo_pago(db, tipo_pago_id, tipo_pago)
     if not db_tipo_pago:
         raise HTTPException(status_code=404, detail="Tipo de pago no encontrado")
     return db_tipo_pago
 
 @router.delete("/{tipo_pago_id}")
-def eliminar_tipo_pago(tipo_pago_id: int, db: Session = Depends(get_db), current_user: dict = Depends(require_rol("admin"))):
+def eliminar_tipo_pago(tipo_pago_id: int, db: Session = Depends(get_db), current_user: dict = Depends(require_rol("admin", "prestamista"))):
     db_tipo_pago = services.delete_tipo_pago(db, tipo_pago_id)
     if not db_tipo_pago:
         raise HTTPException(status_code=404, detail="Tipo de pago no encontrado")

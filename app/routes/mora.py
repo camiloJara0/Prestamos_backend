@@ -102,7 +102,7 @@ def procesar_moras_manual(
     current_user: dict = Depends(get_current_user)
 ):
     """Ejecuta manualmente el cálculo de moras. Exclusivo para administradores."""
-    if current_user.get("rol") != "admin":
+    if current_user.get("rol") != "prestamista":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Acceso denegado. Requiere rol de administrador."

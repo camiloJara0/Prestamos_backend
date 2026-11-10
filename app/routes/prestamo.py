@@ -114,7 +114,7 @@ def ajustar_capital(
     nuevo_capital: float,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(require_rol("admin"))
+    current_user: dict = Depends(require_rol("admin", "prestamista"))
 ):
     prestamo = ajustar_capital_prestamo(
         db, prestamo_id, nuevo_capital,
@@ -135,7 +135,7 @@ def reestructurar(
     datos: ReestructuracionCreate,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(require_rol("admin")),
+    current_user: dict = Depends(require_rol("admin", "prestamista")),
 ):
     """Genera un plan de cuotas nuevo para un préstamo en mora (RF-035). Solo administrador."""
     return reestructurar_prestamo(

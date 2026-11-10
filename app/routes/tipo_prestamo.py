@@ -16,7 +16,7 @@ def get_db():
         db.close()
 
 @router.post("/", response_model=schemas.TipoPrestamoOut)
-def crear_tipo_prestamo(tipo_prestamo: schemas.TipoPrestamoCreate, db: Session = Depends(get_db), current_user: dict = Depends(require_rol("admin"))):
+def crear_tipo_prestamo(tipo_prestamo: schemas.TipoPrestamoCreate, db: Session = Depends(get_db), current_user: dict = Depends(require_rol("admin", "prestamista"))):
     return services.create_tipo_prestamo(db, tipo_prestamo)
 
 @router.get("/", response_model=PaginatedResponse[schemas.TipoPrestamoOut])
@@ -36,14 +36,14 @@ def obtener_tipo_prestamo(tipo_prestamo_id: int, db: Session = Depends(get_db), 
     return db_tipo_prestamo
 
 @router.put("/{tipo_prestamo_id}", response_model=schemas.TipoPrestamoOut)
-def actualizar_tipo_prestamo(tipo_prestamo_id: int, tipo_prestamo: schemas.TipoPrestamoUpdate, db: Session = Depends(get_db), current_user: dict = Depends(require_rol("admin"))):
+def actualizar_tipo_prestamo(tipo_prestamo_id: int, tipo_prestamo: schemas.TipoPrestamoUpdate, db: Session = Depends(get_db), current_user: dict = Depends(require_rol("admin", "prestamista"))):
     db_tipo_prestamo = services.update_tipo_prestamo(db, tipo_prestamo_id, tipo_prestamo)
     if not db_tipo_prestamo:
         raise HTTPException(status_code=404, detail="Tipo de prestamo no encontrado")
     return db_tipo_prestamo
 
 @router.delete("/{tipo_prestamo_id}")
-def eliminar_tipo_prestamo(tipo_prestamo_id: int, db: Session = Depends(get_db), current_user: dict = Depends(require_rol("admin"))):
+def eliminar_tipo_prestamo(tipo_prestamo_id: int, db: Session = Depends(get_db), current_user: dict = Depends(require_rol("admin", "prestamista"))):
     db_tipo_prestamo = services.delete_tipo_prestamo(db, tipo_prestamo_id)
     if not db_tipo_prestamo:
         raise HTTPException(status_code=404, detail="Tipo de prestamo no encontrado")

@@ -304,7 +304,7 @@ class Usuario(Base):
     nombre = Column(String(100), nullable=False)
     email = Column(String(100), unique=True, nullable=False)
     hashed_password = Column(String(255), nullable=False)
-    rol = Column(Enum("admin", "usuario", name="rol_usuario"), default="usuario")
+    rol = Column(Enum("admin", "prestamista", "usuario", name="rol_usuario"), default="usuario")
     estado = Column(Enum("activo", "inactivo", name="estado_usuario"), default="activo")
 
     reset_token = Column(String(255), nullable=True)
