@@ -2,11 +2,13 @@
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.dependencies.auth import get_db
-from app.models.models import TipoPrestamo
+from app.models.models import Cliente, Pago, Prestamo, TipoPrestamo, Usuario
+from app.schemas.landing import LandingEstadisticasOut, PrestamistaPublicoOut
 from app.schemas.solicitud import (
     PlanPublicoOut,
     SimulacionOut,
@@ -20,16 +22,55 @@ from app.services.rate_limit import verificar_rate_limit
 router_planes = APIRouter(prefix="/planes-prestamo", tags=["Publico"])
 router_simulacion = APIRouter(prefix="/solicitudes", tags=["Publico"])
 router_solicitud = APIRouter(prefix="/solicitud-publica", tags=["Publico"])
+router_landing = APIRouter(prefix="/landing", tags=["Publico"])
 
 
 def _ip(request: Request) -> str | None:
     return request.client.host if request.client else None
 
 
+def _validar_prestamista(db: Session, prestamista_id: int) -> Usuario:
+    """Existe y puede ofrecer planes (rol prestamista o admin); si no, 404."""
+    usuario = (
+        db.query(Usuario)
+        .filter(Usuario.id == prestamista_id, Usuario.estado == "activo")
+        .first()
+    )
+    if not usuario or usuario.rol not in ("prestamista", "admin"):
+        raise HTTPException(status_code=404, detail="Prestamista no encontrado")
+    return usuario
+
+
 @router_planes.get("/", response_model=list[PlanPublicoOut])
-def planes_prestamo(db: Session = Depends(get_db)):
-    """CA-R6-2: planes activos con campos públicos seguros, sin token."""
-    return get_planes_publicos(db)
+def planes_prestamo(
+    prestamista: int | None = Query(None, description="ID del prestamista (enlace personalizado)"),
+    db: Session = Depends(get_db),
+):
+    """CA-R6-2: planes activos con campos públicos seguros, sin token.
+
+    Con `?prestamista=ID` devuelve solo los planes de ese prestamista (404 si no existe).
+    """
+    if prestamista is not None:
+        _validar_prestamista(db, prestamista)
+    return get_planes_publicos(db, prestamista_id=prestamista)
+
+
+@router_landing.get("/estadisticas", response_model=LandingEstadisticasOut)
+def landing_estadisticas(db: Session = Depends(get_db)):
+    """Contadores agregados públicos para la sección de confianza de la landing."""
+    return {
+        "prestamos_gestionados": db.query(Prestamo).count(),
+        "clientes_registrados": db.query(Cliente).count(),
+        "pagos_procesados": db.query(Pago).count(),
+        "monto_total_prestado": db.query(func.sum(Prestamo.monto_total)).scalar() or 0.0,
+    }
+
+
+@router_landing.get("/prestamista/{prestamista_id}", response_model=PrestamistaPublicoOut)
+def landing_prestamista(prestamista_id: int, db: Session = Depends(get_db)):
+    """Identidad mínima para el header de /solicitud?prestamista=ID."""
+    usuario = _validar_prestamista(db, prestamista_id)
+    return {"id": usuario.id, "nombre": usuario.nombre}
 
 
 @router_simulacion.get("/simular", response_model=SimulacionOut)

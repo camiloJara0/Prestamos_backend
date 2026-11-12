@@ -148,13 +148,19 @@ def simular_prestamo(
     }
 
 
-def get_planes_publicos(db: Session) -> list[dict]:
-    """RF-081/HU-6.1: planes activos con campos públicos seguros (sin estados internos)."""
+def get_planes_publicos(db: Session, prestamista_id: int | None = None) -> list[dict]:
+    """RF-081/HU-6.1: planes activos con campos públicos seguros (sin estados internos).
+
+    Si `prestamista_id` viene dado, devuelve solo los planes de ese usuario
+    (enlace personalizado /solicitud?prestamista=ID).
+    """
     from app.services.contratos import etiqueta_frecuencia
 
+    query = db.query(TipoPrestamo).filter(TipoPrestamo.estado == "activo")
+    if prestamista_id is not None:
+        query = query.filter(TipoPrestamo.usuario_id == prestamista_id)
     tipos = (
-        db.query(TipoPrestamo)
-        .filter(TipoPrestamo.estado == "activo")
+        query
         .order_by(TipoPrestamo.interes_mensual.asc(), TipoPrestamo.id.asc())
         .all()
     )
