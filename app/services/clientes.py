@@ -5,7 +5,7 @@ from fastapi import HTTPException
 
 from app.models.models import Cliente
 from app.schemas.clientes import ClienteCreate, ClienteUpdate
-from app.core.context import aplicar_filtro_usuario
+from app.core.context import aplicar_filtro_usuario, usuario_actual_id
 from app.utils.pagination import paginate
 
 def get_clientes(db: Session, page: int = 1, limit: int = 10, busqueda: str | None = None):
@@ -28,10 +28,16 @@ def get_cliente(db: Session, cliente_id: int):
     return aplicar_filtro_usuario(db.query(Cliente), Cliente).filter(Cliente.id == cliente_id).first()
 
 def create_cliente(db: Session, cliente: ClienteCreate):
-    existente = db.query(Cliente).filter(Cliente.cedula == cliente.cedula).first()
+    dueño = usuario_actual_id.get()
+    # La cédula se valida dentro del portafolio del usuario (admin ve todo):
+    # dos prestamistas pueden tener clientes con la misma cédula sin filtrarse
+    # información entre sí.
+    existente = aplicar_filtro_usuario(db.query(Cliente), Cliente).filter(
+        Cliente.cedula == cliente.cedula
+    ).first()
     if existente:
         raise HTTPException(status_code=400, detail="Ya existe un cliente con esa cedula")
-    db_cliente = Cliente(**cliente.model_dump())
+    db_cliente = Cliente(**cliente.model_dump(), usuario_id=dueño)
     db.add(db_cliente)
     db.commit()
     db.refresh(db_cliente)
@@ -47,7 +53,9 @@ def update_cliente(db: Session, cliente_id: int, cliente: ClienteUpdate):
     if not db_cliente:
         return None
     if cliente.cedula and cliente.cedula != db_cliente.cedula:
-        existe = db.query(Cliente).filter(Cliente.cedula == cliente.cedula).first()
+        existe = aplicar_filtro_usuario(db.query(Cliente), Cliente).filter(
+            Cliente.cedula == cliente.cedula
+        ).first()
         if existe:
             raise HTTPException(status_code=400, detail="Ya existe un cliente con esa cedula")
     for key, value in cliente.model_dump(exclude_unset=True).items():

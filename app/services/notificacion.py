@@ -31,9 +31,13 @@ def guardar_suscripcion(db: Session, email_usuario: str, subscription: PushSubsc
     return db_sub
 
 
-def eliminar_suscripcion(db: Session, endpoint: str) -> bool:
-    """Elimina una suscripción Push mediante su endpoint."""
-    sub = db.query(PushSubscription).filter(PushSubscription.endpoint == endpoint).first()
+def eliminar_suscripcion(db: Session, endpoint: str, usuario_id: int | None = None) -> bool:
+    """Elimina una suscripción push por endpoint. Solo del propio usuario
+    (un endpoint ajeno no puede borrarse: devuelve False)."""
+    filtros = [PushSubscription.endpoint == endpoint]
+    if usuario_id is not None:
+        filtros.append(PushSubscription.usuario_id == usuario_id)
+    sub = db.query(PushSubscription).filter(*filtros).first()
     if sub:
         db.delete(sub)
         db.commit()

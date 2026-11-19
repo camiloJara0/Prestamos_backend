@@ -5,7 +5,7 @@ from fastapi import HTTPException
 
 from app.models.models import Pago, PrestamoCuota, Prestamo, MovimientoCapital, TipoPago, Capital, Cliente
 from app.schemas.pago import PagoCreate, PagoDevolucionCreate, PagoOut
-from app.core.context import aplicar_filtro_usuario
+from app.core.context import aplicar_filtro_usuario, usuario_actual_id
 from app.utils.pagination import paginate
 
 
@@ -148,6 +148,9 @@ def registrar_pago(db: Session, pago: PagoCreate, usuario_id: int, ip_address: s
     fecha_pago_val = pago.fecha_pago or datetime.now(timezone.utc)
     referencia_recibo = _generar_referencia_recibo()
 
+    # El pago pertenece al dueño del préstamo (aislamiento multiusuario).
+    dueño = prestamo.usuario_id if prestamo.usuario_id is not None else usuario_actual_id.get()
+
     db_pago = Pago(
         prestamo_id=pago.prestamo_id,
         cliente_id=pago.cliente_id,
@@ -160,7 +163,8 @@ def registrar_pago(db: Session, pago: PagoCreate, usuario_id: int, ip_address: s
         mora_pagada=pago.mora_pagada,
         observaciones=pago.observaciones,
         referencia_recibo=referencia_recibo,
-        estado_pago="confirmado"
+        estado_pago="confirmado",
+        usuario_id=dueño
     )
     db.add(db_pago)
 
@@ -183,8 +187,12 @@ def registrar_pago(db: Session, pago: PagoCreate, usuario_id: int, ip_address: s
     if prestamo.saldo_pendiente <= 0:
         prestamo.estado = "pagado"
 
-    # Actualizar capital global
-    capital_obj = db.query(Capital).first()
+    # Actualizar capital del dueño del préstamo (nunca una fila ajena).
+    capital_obj = (
+        db.query(Capital)
+        .filter(Capital.usuario_id == dueño)
+        .first()
+    )
     if capital_obj:
         capital_obj.monto_total += pago.capital_pagado
 
@@ -193,7 +201,8 @@ def registrar_pago(db: Session, pago: PagoCreate, usuario_id: int, ip_address: s
         tipo_movimiento="pago_recibido",
         descripcion=f"Pago cuota #{cuota.numero_cuota} (Recibo: {referencia_recibo}) - Préstamo #{prestamo.id}",
         valor=pago.capital_pagado,
-        fecha=fecha_pago_val
+        fecha=fecha_pago_val,
+        usuario_id=dueño
     )
     db.add(movimiento)
 
@@ -231,7 +240,8 @@ def registrar_pago(db: Session, pago: PagoCreate, usuario_id: int, ip_address: s
 
 
 def devolver_pago(db: Session, pago_id: int, datos_devolucion: PagoDevolucionCreate, usuario_id: int, ip_address: str | None = None):
-    db_pago = db.query(Pago).filter(Pago.id == pago_id).first()
+    # IDOR: solo se puede devolver un pago propio (admin ve todos).
+    db_pago = aplicar_filtro_usuario(db.query(Pago), Pago).filter(Pago.id == pago_id).first()
     if not db_pago:
         raise HTTPException(status_code=404, detail="Pago no encontrado")
 
@@ -258,7 +268,7 @@ def devolver_pago(db: Session, pago_id: int, datos_devolucion: PagoDevolucionCre
         )
 
     # 1. Reversión en Préstamo
-    prestamo = db.query(Prestamo).filter(Prestamo.id == db_pago.prestamo_id).first()
+    prestamo = aplicar_filtro_usuario(db.query(Prestamo), Prestamo).filter(Prestamo.id == db_pago.prestamo_id).first()
     if prestamo:
         # Control para evitar inflar el saldo más allá del monto total original
         monto_a_reversar = db_pago.capital_pagado + db_pago.interes_pagado
@@ -288,8 +298,14 @@ def devolver_pago(db: Session, pago_id: int, datos_devolucion: PagoDevolucionCre
         else:
             cuota.estado = "parcial"
 
-    # 3. Ajuste de Capital Global (misma convención que el registro: solo la porción de capital)
-    capital_obj = db.query(Capital).first()
+    # 3. Ajuste de Capital del dueño del préstamo (misma convención que el
+    # registro: solo la porción de capital).
+    dueño = prestamo.usuario_id if prestamo is not None else usuario_actual_id.get()
+    capital_obj = (
+        db.query(Capital)
+        .filter(Capital.usuario_id == dueño)
+        .first()
+    )
     if capital_obj:
         capital_obj.monto_total = round(capital_obj.monto_total - db_pago.capital_pagado, 2)
 
@@ -298,7 +314,8 @@ def devolver_pago(db: Session, pago_id: int, datos_devolucion: PagoDevolucionCre
         tipo_movimiento="devolucion_pago",
         descripcion=f"Devolución de pago Recibo: {db_pago.referencia_recibo} - Motivo: {datos_devolucion.motivo_devolucion}",
         valor=-db_pago.capital_pagado,
-        fecha=ahora
+        fecha=ahora,
+        usuario_id=dueño
     )
     db.add(movimiento)
 

@@ -11,19 +11,22 @@ from app.models.models import Cliente, Prestamo, PrestamoCuota, PushSubscription
 def suscribir_usuario(
     db: Session, usuario_id: int, subscription_data
 ) -> PushSubscription:
-    """Guarda o actualiza la suscripción push de un dispositivo/navegador."""
+    """Guarda o actualiza la suscripción push de un dispositivo/navegador.
+
+    Solo se toca la suscripción si pertenece al propio usuario: un endpoint
+    registrado por otro usuario se registra como fila nueva en su lugar.
+    """
     endpoint = subscription_data.endpoint
     p256dh = subscription_data.keys.p256dh
     auth = subscription_data.keys.auth
 
     sub = (
         db.query(PushSubscription)
-        .filter(PushSubscription.endpoint == endpoint)
+        .filter(PushSubscription.endpoint == endpoint, PushSubscription.usuario_id == usuario_id)
         .first()
     )
 
     if sub:
-        sub.usuario_id = usuario_id
         sub.p256dh = p256dh
         sub.auth = auth
     else:

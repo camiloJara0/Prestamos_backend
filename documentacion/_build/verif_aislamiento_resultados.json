@@ -1,0 +1,80 @@
+{
+  "modulo": "aislamiento_multiusuario_y_mensajeria",
+  "fecha": "2026-11-18",
+  "resumen": {
+    "verif_aislamiento": "69 OK / 0 FAIL",
+    "verif_backoffice": "59 OK / 0 FAIL",
+    "verif_roles": "28 OK / 0 FAIL",
+    "verif_landing": "17 OK / 0 FAIL",
+    "total": "173 checks OK"
+  },
+  "correcciones_aislamiento": [
+    "crear_prestamo: capital SOLO del usuario autenticado (antes tomaba la primera fila global); Prestamo/MovimientoCapital con dueño; cliente y tipo_prestamo validados por portafolio; bloqueo por cuotas vencidas solo del propio prestamista",
+    "registrar_pago: Pago y MovimientoCapital heredan dueño del préstamo; capital actualizado solo del dueño (antes primera fila global)",
+    "devolver_pago: IDOR bloqueado (solo pagos propios); capital del dueño",
+    "renovar_prestamo/marcar_prestamo_perdido/ajustar_capital/reestructurar: préstamo validado por dueño (admin ve todo); capital del dueño; registros con usuario_id",
+    "capital.get_or_create_capital/registrar_movimiento: dueño desde contexto",
+    "mora: get_moras_prestamo filtrado por dueño; Mora creada con dueño del préstamo",
+    "clientes: cédula única POR PORTAFOLIO (dos prestamistas pueden tener la misma cédula); creación/edición con dueño",
+    "tipo_prestamo/tipo_pago: creación con dueño",
+    "plantillas: todas las operaciones (listar/obtener/crear/editar/eliminar/métricas/envíos) filtradas por dueño; clave única POR USUARIO (migración reconstruye tabla en SQLite, DROP INDEX en MySQL); registrar_envio asigna dueño",
+    "pasarela: crear_intencionPago valida cuota del dueño; listado de transacciones filtrado por creado_por",
+    "push: suscribir/eliminar solo del propio usuario",
+    "conciliacion: Pago automático con dueño del préstamo",
+    "scoring: historial crediticio solo con préstamos del prestamista evaluador",
+    "agenda: conteo de uso de tipo de cita filtrado por usuario",
+    "rutas normalizadas a id numérico del token (antes pasaban el email como usuario_id): prestamo, capital, mora, plantilla",
+    "migración _asegurar_unicidad_cedula: elimina UNIQUE global de clientes.cedula",
+    "guard corregido en /mora/procesar-manual (antes bloqueaba al admin)"
+  ],
+  "plantillas_base_automaticas": {
+    "comportamiento": "Al registrar un usuario rol prestamista, sembrar_plantillas_base crea 8 plantillas predeterminadas asociadas EXCLUSIVAMENTE al nuevo usuario; puede modificarlas/eliminarlas sin afectar a otros; idempotente",
+    "pruebas": "P1 y P2 reciben 8 plantillas cada uno, filas distintas; clave compartida permitida entre usuarios"
+  },
+  "nombre_empresa": {
+    "parametro": "nombre_empresa en configuracion_sistema (default LoanSoft), con override por usuario (cada prestamista puede personalizarla)",
+    "uso": [
+      "Comprobante/recibo PDF (antes hardcodeado 'Credifast')",
+      "Encabezados de reportes Excel y PDF (reportes/ganancias/excel verificado)",
+      "Contratos (reemplaza PRESTAMISTA_NOMBRE env)",
+      "Mensajes de recordatorios por WhatsApp",
+      "Variable {{empresa}} en todas las plantillas (componer y previsualizar)"
+    ]
+  },
+  "comprobante_whatsapp": {
+    "backend": [
+      "POST /pagos/{id}/enviar-whatsapp: valida pago propio, teléfono del cliente (400 si falta), genera PDF con nombre de empresa, envía por WhatsApp Cloud API (WHATSAPP_ACCESS_TOKEN/WHATSAPP_PHONE_NUMBER_ID) o proveedor piloto, registra EnvioMensaje y auditoría; reenvíos permitidos",
+      "GET /pagos/{id}/envios-whatsapp: historial aislado por usuario",
+      "Fallback: si el proveedor no está configurado devuelve whatsapp_url (wa.me) para envío manual con el mensaje listo"
+    ],
+    "frontend": "PrestamoPagoModal: botón 'Enviar por WhatsApp' deshabilitado si el cliente no tiene teléfono, confirmación/estado en el modal, historial y reenvío"
+  },
+  "pruebas_detalladas": {
+    "seccion_1": "Plantillas base automáticas: 5 checks",
+    "seccion_2": "Capital por usuario (aportes y saldos independientes): 4 checks",
+    "seccion_3": "Clientes aislados + cédula por portafolio: 5 checks",
+    "seccion_4": "Tipos de préstamo/pago aislados (ver/editar/eliminar): 6 checks",
+    "seccion_5": "Préstamos con capital propio, cliente ajeno 404, tipo ajeno 404, listado aislado: 9 checks",
+    "seccion_6": "IDOR (renovar/marcar_perdido/ajustar/reestructurar/editar/eliminar/intención pasarela): 7 checks",
+    "seccion_7": "Pagos aislados, capital del dueño, devolución ajena 404, movimientos aislados: 8 checks",
+    "seccion_8": "Plantillas: edición/eliminación ajena 404, clave compartida permitida: 5 checks",
+    "seccion_9": "Historial y métricas de envíos aislados: 3 checks",
+    "seccion_10": "Nombre empresa global + override por usuario + Excel: 6 checks",
+    "seccion_11": "Comprobante WhatsApp (envío piloto, historial, IDOR, sin teléfono): 7 checks",
+    "seccion_12": "Admin ve todo: 2 checks",
+    "seccion_13": "Cálculos financieros aislados (reporte ganancias por usuario): 2 checks"
+  },
+  "scripts": [
+    "verif_aislamiento.py (Temp/opencode): suite de aislamiento, 69 checks",
+    "verif_backoffice.py: 59 checks (regresión)",
+    "verif_roles.py: 28 checks (regresión)",
+    "verif_landing.py: 17 checks (regresión)"
+  ],
+  "frontend_checks": {
+    "typecheck": "solo 6 errores preexistentes de WIP ajeno (PrestamoForm x5, RenovarModal x1)",
+    "eslint_archivos_propios": "EXIT=0",
+    "tests": "54/54",
+    "build": "OK",
+    "mojibake": 0
+  }
+}

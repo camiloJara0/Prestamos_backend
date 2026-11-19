@@ -112,9 +112,11 @@ def emitir_contrato(
 
     cliente = solicitud.cliente
     tipo = solicitud.tipo_prestamo
+    from app.services.configuracion import obtener_nombre_empresa
+
     datos = {
         "referencia": f"SOL-{solicitud.id:06d}",
-        "prestamista": os.getenv("PRESTAMISTA_NOMBRE", "LoanSoft"),
+        "prestamista": obtener_nombre_empresa(db),
         "cliente_nombre": cliente.nombre if cliente else "—",
         "cliente_cedula": cliente.cedula if cliente else "—",
         "monto": solicitud.monto_solicitado,

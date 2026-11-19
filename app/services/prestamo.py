@@ -15,7 +15,7 @@ from sqlalchemy import or_, func
 from app.models.models import Prestamo, PrestamoCuota, MovimientoCapital, Capital, Cliente, TipoPrestamo, PrestamoRenovacion, PrestamoPerdido, PrestamoReestructuracion, Mora, Pago
 from app.schemas.prestamo import PrestamoCreate
 from app.services.capital import get_or_create_capital
-from app.core.context import aplicar_filtro_usuario
+from app.core.context import aplicar_filtro_usuario, usuario_actual_id
 from app.utils.pagination import paginate
 
 logger = logging.getLogger(__name__)
@@ -180,16 +180,28 @@ def get_planes_publicos(db: Session, prestamista_id: int | None = None) -> list[
 
 
 def crear_prestamo(db: Session, prestamo: PrestamoCreate, usuario_id: int, ip_address: str | None = None):
-    cliente = db.query(Cliente).filter(Cliente.id == prestamo.cliente_id, Cliente.estado == "activo").first()
+    # Dueño del préstamo: usuario autenticado que realiza la operación.
+    # (Las rutas pasan el id numérico del token; fallback al contexto.)
+    dueño = usuario_id if isinstance(usuario_id, int) else usuario_actual_id.get()
+
+    cliente = aplicar_filtro_usuario(db.query(Cliente), Cliente).filter(
+        Cliente.id == prestamo.cliente_id, Cliente.estado == "activo"
+    ).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado o inactivo")
-    
-    cuotas_vencidas = db.query(PrestamoCuota).join(Prestamo).filter(
-        Prestamo.cliente_id == prestamo.cliente_id,
-        PrestamoCuota.estado.in_(["vencido", "parcial"]),
-        PrestamoCuota.fecha_vencimiento < date.today()
-    ).all()
-    
+
+    cuotas_vencidas = (
+        db.query(PrestamoCuota)
+        .join(Prestamo, PrestamoCuota.prestamo_id == Prestamo.id)
+        .filter(
+            Prestamo.usuario_id == dueño,
+            Prestamo.cliente_id == prestamo.cliente_id,
+            PrestamoCuota.estado.in_(["vencido", "parcial"]),
+            PrestamoCuota.fecha_vencimiento < date.today()
+        )
+        .all()
+    )
+
     if cuotas_vencidas:
         cuotas_pendientes = len(cuotas_vencidas)
         valor_pendiente = sum(c.valor_cuota for c in cuotas_vencidas)
@@ -197,8 +209,8 @@ def crear_prestamo(db: Session, prestamo: PrestamoCreate, usuario_id: int, ip_ad
             status_code=400,
             detail=f"Cliente tiene {cuotas_pendientes} cuota(s) vencida(s) sin pagar. Monto pendiente: ${valor_pendiente:,.2f}. Debe pagar antes de solicitar nuevo préstamo."
         )
-    
-    tipo_prestamo = db.query(TipoPrestamo).filter(
+
+    tipo_prestamo = aplicar_filtro_usuario(db.query(TipoPrestamo), TipoPrestamo).filter(
         TipoPrestamo.id == prestamo.tipo_prestamo_id,
         TipoPrestamo.estado == "activo"
     ).first()
@@ -207,11 +219,12 @@ def crear_prestamo(db: Session, prestamo: PrestamoCreate, usuario_id: int, ip_ad
 
     # RF: respetar la fecha informada por el usuario (préstamos con fecha anterior).
     fecha_base = prestamo.fecha_prestamo or date.today()
-    
-    capital = db.query(Capital).first()
+
+    # RF aislamiento: SOLO el capital del usuario autenticado.
+    capital = aplicar_filtro_usuario(db.query(Capital), Capital).first()
     if not capital or capital.monto_total < prestamo.capital_prestado:
         raise HTTPException(status_code=400, detail="Capital insuficiente para otorgar el préstamo")
-    
+
     db_prestamo = Prestamo(
         cliente_id=prestamo.cliente_id,
         tipo_prestamo_id=prestamo.tipo_prestamo_id,
@@ -219,7 +232,8 @@ def crear_prestamo(db: Session, prestamo: PrestamoCreate, usuario_id: int, ip_ad
         capital_prestado=prestamo.capital_prestado,
         porcentaje_interes=prestamo.porcentaje_interes,
         numero_cuotas=prestamo.numero_cuotas,
-        estado="activo"
+        estado="activo",
+        usuario_id=dueño
     )
     
     db_prestamo.interes_total = calcular_interes_total(
@@ -274,7 +288,8 @@ def crear_prestamo(db: Session, prestamo: PrestamoCreate, usuario_id: int, ip_ad
         descripcion=f"Préstamo #{db_prestamo.id} al cliente {cliente.nombre}",
         valor=prestamo.capital_prestado,
         fecha=date.today(),
-        prestamo_id=db_prestamo.id
+        prestamo_id=db_prestamo.id,
+        usuario_id=dueño
     )
     db.add(movimiento)
     
@@ -301,6 +316,22 @@ def crear_prestamo(db: Session, prestamo: PrestamoCreate, usuario_id: int, ip_ad
     )
 
     _correo_prestamo_creado(db, db_prestamo, cliente, usuario_id)
+
+    try:
+        # Resumen inicial del préstamo por WhatsApp al cliente (no revierte).
+        from app.services.eventos_mensajeria import notificar_prestamo_creado
+
+        primera = (
+            db.query(PrestamoCuota)
+            .filter(
+                PrestamoCuota.prestamo_id == db_prestamo.id,
+                PrestamoCuota.numero_cuota == 1,
+            )
+            .first()
+        )
+        notificar_prestamo_creado(db, db_prestamo, cliente, primera)
+    except Exception:  # noqa: BLE001
+        pass
 
     try:
         # RF-080: eventos de vencimiento en la agenda; idempotente, no revierte el préstamo.
@@ -336,29 +367,36 @@ def _usuario_para_aviso(db: Session, usuario_id):
 
 
 def _correo_prestamo_creado(db: Session, prestamo, cliente, usuario_id: int) -> None:
-    """RF-061: aviso por correo de la creación del préstamo; un fallo no revierte la operación."""
+    """RF-061: aviso por correo al usuario responsable (sin plantilla: texto
+    directo, ya que el canal principal para clientes es WhatsApp y la
+    plantilla 'prestamo_creado' migró a WhatsApp). Un fallo no revierte."""
     try:
-        from app.services.canales import enviar_por_canal
+        from app.services.email import enviar_correo
+        from app.services.configuracion import obtener_nombre_empresa
 
         usuario = _usuario_para_aviso(db, usuario_id)
         if not usuario:
             return
-        resultado = enviar_por_canal(
-            db,
-            canal="email",
-            destinatario=usuario.email,
-            clave="prestamo_creado",
-            contexto={
-                "nombre": cliente.nombre.split()[0] if cliente.nombre else "cliente",
-                "prestamo_id": prestamo.id,
-                "monto": f"{prestamo.capital_prestado:,.0f}",
-                "numero_cuotas": prestamo.numero_cuotas,
-            },
+        empresa = obtener_nombre_empresa(db)
+        enviado = enviar_correo(
+            usuario.email,
+            f"Préstamo #{{}} registrado".format(prestamo.id),
+            (
+                f"<p>Hola {usuario.nombre},</p>"
+                f"<p>Se registró el préstamo #{prestamo.id} por "
+                f"${prestamo.capital_prestado:,.0f} a {prestamo.numero_cuotas} "
+                f"cuotas (cliente {cliente.nombre}). — {empresa}</p>"
+            ),
+            texto_plano=(
+                f"Se registró el préstamo #{prestamo.id} por "
+                f"${prestamo.capital_prestado:,.0f} a {prestamo.numero_cuotas} "
+                f"cuotas (cliente {cliente.nombre}). — {empresa}"
+            ),
         )
-        if resultado.get("estado") == "fallido":
+        if not enviado:
             logger.warning(
-                "[PRESTAMOS] Aviso de creación del préstamo #%s no entregado por correo: %s",
-                prestamo.id, resultado.get("motivo"),
+                "[PRESTAMOS] Aviso de creación del préstamo #%s no entregado por correo (SMTP no disponible).",
+                prestamo.id,
             )
     except Exception as exc:  # noqa: BLE001 - el fallo de correo no revierte la creación
         logger.error(
@@ -418,12 +456,14 @@ def obtener_prestamo(db: Session, prestamo_id: int):
 
 
 def renovar_prestamo(db: Session, prestamo_id: int, renovacion, usuario_id=None, ip_address: str | None = None):
-    prestamo_original = db.query(Prestamo).filter(Prestamo.id == prestamo_id).first()
+    # IDOR: solo préstamos propios (admin ve todos).
+    prestamo_original = aplicar_filtro_usuario(db.query(Prestamo), Prestamo).filter(Prestamo.id == prestamo_id).first()
     if not prestamo_original:
         raise HTTPException(status_code=404, detail="Prestamo no encontrado")
     if prestamo_original.estado in ["pagado", "perdido", "renovado"]:
         raise HTTPException(status_code=400, detail=f"No se puede renovar un prestamo en estado {prestamo_original.estado}")
 
+    dueño = prestamo_original.usuario_id
     tipo_renovacion = db.query(TipoPrestamo).filter(TipoPrestamo.id == prestamo_original.tipo_prestamo_id).first()
 
     saldo = prestamo_original.saldo_pendiente
@@ -450,7 +490,8 @@ def renovar_prestamo(db: Session, prestamo_id: int, renovacion, usuario_id=None,
             valor_cuota=valor_cuota,
             saldo_pendiente=monto_total,
             estado="activo",
-            observaciones=renovacion.observaciones
+            observaciones=renovacion.observaciones,
+            usuario_id=dueño
         )
         db.add(nuevo_prestamo)
         db.flush()
@@ -494,12 +535,17 @@ def renovar_prestamo(db: Session, prestamo_id: int, renovacion, usuario_id=None,
             prestamo_anterior_id=prestamo_original.id,
             prestamo_nuevo_id=nuevo_prestamo.id,
             fecha=renovacion.fecha_renovacion,
-            observaciones=renovacion.observaciones
+            observaciones=renovacion.observaciones,
+            usuario_id=dueño
         )
         db.add(renovacion_registro)
 
         if abono > 0:
-            capital_obj = db.query(Capital).first()
+            capital_obj = (
+                db.query(Capital)
+                .filter(Capital.usuario_id == dueño)
+                .first()
+            )
             if capital_obj:
                 capital_obj.monto_total += abono
                 mov_abono = MovimientoCapital(
@@ -507,7 +553,8 @@ def renovar_prestamo(db: Session, prestamo_id: int, renovacion, usuario_id=None,
                     descripcion=f"Abono por renovación del préstamo #{prestamo_original.id}",
                     valor=abono,
                     fecha=renovacion.fecha_renovacion,
-                    prestamo_id=nuevo_prestamo.id
+                    prestamo_id=nuevo_prestamo.id,
+                    usuario_id=dueño
                 )
                 db.add(mov_abono)
 
@@ -540,12 +587,14 @@ def renovar_prestamo(db: Session, prestamo_id: int, renovacion, usuario_id=None,
 
 
 def marcar_prestamo_perdido(db: Session, prestamo_id: int, datos, usuario_id=None, ip_address: str | None = None):
-    prestamo = db.query(Prestamo).filter(Prestamo.id == prestamo_id).first()
+    # IDOR: solo préstamos propios (admin ve todos).
+    prestamo = aplicar_filtro_usuario(db.query(Prestamo), Prestamo).filter(Prestamo.id == prestamo_id).first()
     if not prestamo:
         raise HTTPException(status_code=404, detail="Prestamo no encontrado")
     if prestamo.estado in ["pagado", "perdido", "renovado"]:
         raise HTTPException(status_code=400, detail=f"No se puede marcar como perdido un prestamo en estado {prestamo.estado}")
 
+    dueño = prestamo.usuario_id
     valor_perdido = prestamo.saldo_pendiente
 
     try:
@@ -553,13 +602,18 @@ def marcar_prestamo_perdido(db: Session, prestamo_id: int, datos, usuario_id=Non
             prestamo_id=prestamo.id,
             fecha=datos.fecha,
             valor_perdido=valor_perdido,
-            motivo=datos.motivo
+            motivo=datos.motivo,
+            usuario_id=dueño
         )
         db.add(perdido)
 
         prestamo.estado = "perdido"
 
-        capital_obj = db.query(Capital).first()
+        capital_obj = (
+            db.query(Capital)
+            .filter(Capital.usuario_id == dueño)
+            .first()
+        )
         if capital_obj:
             capital_obj.monto_total -= valor_perdido
 
@@ -568,7 +622,8 @@ def marcar_prestamo_perdido(db: Session, prestamo_id: int, datos, usuario_id=Non
             descripcion=f"Prestamo {prestamo.id} marcado como perdido",
             valor=valor_perdido,
             fecha=datos.fecha,
-            prestamo_id=prestamo.id
+            prestamo_id=prestamo.id,
+            usuario_id=dueño
         )
         db.add(movimiento)
 
@@ -605,7 +660,8 @@ def marcar_prestamo_perdido(db: Session, prestamo_id: int, datos, usuario_id=Non
 
 
 def ajustar_capital_prestamo(db: Session, prestamo_id: int, nuevo_capital: float, usuario_id: int, ip_address: str | None = None):
-    db_prestamo = db.query(Prestamo).filter(Prestamo.id == prestamo_id).first()
+    # IDOR: solo préstamos propios (admin ve todos).
+    db_prestamo = aplicar_filtro_usuario(db.query(Prestamo), Prestamo).filter(Prestamo.id == prestamo_id).first()
     if not db_prestamo:
         raise HTTPException(status_code=404, detail="Préstamo no encontrado")
     
@@ -647,17 +703,22 @@ def ajustar_capital_prestamo(db: Session, prestamo_id: int, nuevo_capital: float
         cuota.capital = round(nuevo_capital / db_prestamo.numero_cuotas, 2)
         cuota.interes = round(db_prestamo.interes_total / db_prestamo.numero_cuotas, 2)
     
-    capital = db.query(Capital).first()
+    capital = (
+        db.query(Capital)
+        .filter(Capital.usuario_id == db_prestamo.usuario_id)
+        .first()
+    )
     if capital is not None and diferencia != 0:
         capital.monto_total = round(capital.monto_total - diferencia, 2)
-    
+
     if diferencia != 0:
         movimiento = MovimientoCapital(
             tipo_movimiento="ajuste_prestamo",
             descripcion=f"Ajuste de capital en préstamo #{prestamo_id}: ${capital_anterior:,.2f} → ${nuevo_capital:,.2f}",
             valor=abs(diferencia),
             fecha=date.today(),
-            prestamo_id=prestamo_id
+            prestamo_id=prestamo_id,
+            usuario_id=db_prestamo.usuario_id
         )
         db.add(movimiento)
     
@@ -691,7 +752,7 @@ def reestructurar_prestamo(db: Session, prestamo_id: int, datos, usuario_id: int
     Renegocia plazo e interés de un préstamo en mora generando un plan de cuotas
     nuevo vinculado al préstamo original, sin cancelar el histórico (RF-035).
     """
-    prestamo = db.query(Prestamo).filter(Prestamo.id == prestamo_id).first()
+    prestamo = aplicar_filtro_usuario(db.query(Prestamo), Prestamo).filter(Prestamo.id == prestamo_id).first()
     if not prestamo:
         raise HTTPException(status_code=404, detail="Préstamo no encontrado")
     if prestamo.estado != "activo":
@@ -797,6 +858,7 @@ def reestructurar_prestamo(db: Session, prestamo_id: int, datos, usuario_id: int
         valor_cuota=prestamo.valor_cuota,
         monto_plan=plan_total,
         estado="activa",
+        usuario_id=prestamo.usuario_id,
     )
     db.add(reestructuracion)
     db.flush()

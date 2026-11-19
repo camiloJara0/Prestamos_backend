@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from app.models.models import TipoPago
 from app.schemas.tipo_pago import TipoPagoCreate, TipoPagoUpdate
-from app.core.context import aplicar_filtro_usuario
+from app.core.context import aplicar_filtro_usuario, usuario_actual_id
 from app.utils.pagination import paginate
 
 def get_tipo_pagos(db: Session, page: int = 1, limit: int = 10):
@@ -13,7 +13,7 @@ def get_tipo_pago(db: Session, tipo_pago_id: int):
     return aplicar_filtro_usuario(db.query(TipoPago), TipoPago).filter(TipoPago.id == tipo_pago_id).first()
 
 def create_tipo_pago(db: Session, tipo_pago: TipoPagoCreate):
-    db_tipo_pago = TipoPago(**tipo_pago.dict())
+    db_tipo_pago = TipoPago(**tipo_pago.dict(), usuario_id=usuario_actual_id.get())
     db.add(db_tipo_pago)
     db.commit()
     db.refresh(db_tipo_pago)

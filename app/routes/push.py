@@ -45,8 +45,9 @@ def eliminar_suscripcion_push(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    """RF-060: elimina la suscripción push del navegador."""
-    eliminar_suscripcion(db=db, endpoint=datos.endpoint)
+    """RF-060: elimina la suscripción push del navegador (solo la propia)."""
+    usuario_id = get_usuario_id(current_user)
+    eliminar_suscripcion(db=db, endpoint=datos.endpoint, usuario_id=usuario_id)
     return {"message": "Suscripción eliminada correctamente."}
 
 

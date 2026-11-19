@@ -16,7 +16,7 @@ from datetime import datetime
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.models.models import Capital, MovimientoCapital, Pago, PrestamoCuota, TipoPago, TransaccionPasarela
+from app.models.models import Capital, MovimientoCapital, Pago, Prestamo, PrestamoCuota, TipoPago, TransaccionPasarela
 from app.schemas.pago import PagoCreate
 from app.services.pago import registrar_pago
 from app.utils.pagination import paginate
@@ -63,7 +63,16 @@ def crear_intencion_pago(db: Session, cuota_id: int, usuario_id: int | None = No
             detail="Pasarela de pago no configurada. Configure PASARELA_PROVIDER para habilitar el cobro en línea.",
         )
 
-    cuota = db.query(PrestamoCuota).filter(PrestamoCuota.id == cuota_id).first()
+    # IDOR: solo se pueden crear intenciones sobre cuotas propias (admin ve todas).
+    filtros = [PrestamoCuota.id == cuota_id]
+    if usuario_id is not None:
+        filtros.append(Prestamo.usuario_id == usuario_id)
+    cuota = (
+        db.query(PrestamoCuota)
+        .join(Prestamo, PrestamoCuota.prestamo_id == Prestamo.id)
+        .filter(*filtros)
+        .first()
+    )
     if not cuota:
         raise HTTPException(status_code=404, detail="Cuota no encontrada")
     if cuota.estado == "pagado":
@@ -168,7 +177,14 @@ def get_transaccion_por_referencia(db: Session, referencia: str) -> TransaccionP
 
 
 def get_transacciones(db: Session, page: int = 1, limit: int = 10, estado: str | None = None):
+    # Aislamiento: cada prestamista ve sus transacciones (admin todas).
+    # El modelo usa `creado_por` (no usuario_id), por lo que el filtro es explícito.
+    from app.core.context import usuario_actual_id, usuario_actual_rol
+
     query = db.query(TransaccionPasarela).order_by(TransaccionPasarela.id.desc())
+    uid = usuario_actual_id.get()
+    if uid is not None and usuario_actual_rol.get() != "admin":
+        query = query.filter(TransaccionPasarela.creado_por == uid)
     if estado:
         query = query.filter(TransaccionPasarela.estado == estado)
     return paginate(query, page=page, limit=limit)

@@ -28,8 +28,24 @@ MESES = [
 TIPOS_VALIDOS = ("proximos", "vencidos")
 
 
+def _dias_gracia(db: Session) -> int:
+    try:
+        from app.services.configuracion import resolver_parametro
+
+        valor, _ = resolver_parametro(db, "dias_gracia_mora", "3")
+        return max(0, int(valor or 3))
+    except (TypeError, ValueError):
+        return 3
+
+
 def _consulta(db: Session, tipo: str, dias: int):
-    """Devuelve (hoy, filas) con las cuotas que cumplen el criterio indicado."""
+    """Devuelve (hoy, filas) con las cuotas que cumplen el criterio indicado.
+
+    'proximos' incluye TODO el rango de recordatorio (RF recordatorios):
+    - futuras: vencen entre hoy y hoy + dias
+    - vencidas recientes: dentro del período de gracia (hoy - gracia .. hoy - 1)
+    y EXCLUYE automáticamente las cuotas cuyo período de gracia ya expiró.
+    """
     if tipo not in TIPOS_VALIDOS:
         raise HTTPException(
             status_code=400,
@@ -37,6 +53,7 @@ def _consulta(db: Session, tipo: str, dias: int):
         )
 
     hoy = date.today()
+    gracia = _dias_gracia(db)
     # Los jobs corren sin contexto (ven todo); una llamada con sesión filtrada
     # solo vería los recordatorios del usuario actual.
     query = aplicar_filtro_usuario(
@@ -49,8 +66,8 @@ def _consulta(db: Session, tipo: str, dias: int):
     if tipo == "proximos":
         fecha_limite = hoy + timedelta(days=dias)
         query = query.filter(
-            PrestamoCuota.estado == "pendiente",
-            PrestamoCuota.fecha_vencimiento >= hoy,
+            PrestamoCuota.estado.in_(("pendiente", "vencido", "parcial")),
+            PrestamoCuota.fecha_vencimiento >= hoy - timedelta(days=gracia),
             PrestamoCuota.fecha_vencimiento <= fecha_limite,
         )
     else:
@@ -68,19 +85,24 @@ def _referencia(cuota: PrestamoCuota, prestamo: Prestamo) -> str:
 
 
 def _contexto(cuota: PrestamoCuota, prestamo: Prestamo, cliente: Cliente, hoy: date) -> dict:
-    """Variables disponibles para las plantillas de recordatorio."""
+    """Variables disponibles para las plantillas de recordatorio.
+
+    Incluye las variables canónicas del catálogo (cliente_*, prestamo_*,
+    cuota_*) y las históricas de compatibilidad (nombre, monto, fecha...).
+    """
     dias_para_vencer = (cuota.fecha_vencimiento - hoy).days
     dias_atraso = (hoy - cuota.fecha_vencimiento).days
-    monto_fmt = f"{int(cuota.valor_cuota):,}".replace(",", ".")
-    mora_fmt = f"{int(cuota.mora or 0):,}".replace(",", ".")
+    monto_fmt = f"${int(cuota.valor_cuota):,}".replace(",", ".")
+    mora_fmt = f"${int(cuota.mora or 0):,}".replace(",", ".")
+    prestamo_monto_fmt = f"${int(prestamo.capital_prestado):,}".replace(",", ".")
+    prestamo_saldo_fmt = f"${int(prestamo.saldo_pendiente):,}".replace(",", ".")
     fecha_str = f"{cuota.fecha_vencimiento.day} {MESES[cuota.fecha_vencimiento.month - 1]}"
+    fecha_venc_fmt = cuota.fecha_vencimiento.strftime("%d/%m/%Y")
     primer_nombre = cliente.nombre.split()[0].capitalize() if cliente.nombre else "Cliente"
 
     return {
+        # Compatibilidad histórica
         "nombre": primer_nombre,
-        "cliente_nombre": cliente.nombre or "",
-        "prestamo_id": prestamo.id,
-        "cuota_id": cuota.id,
         "numero_cuota": cuota.numero_cuota,
         "monto": monto_fmt,
         "monto_valor": cuota.valor_cuota,
@@ -88,23 +110,46 @@ def _contexto(cuota: PrestamoCuota, prestamo: Prestamo, cliente: Cliente, hoy: d
         "fecha": fecha_str,
         "fecha_vencimiento": cuota.fecha_vencimiento.isoformat(),
         "referencia": _referencia(cuota, prestamo),
-        "dias_para_vencer": dias_para_vencer,
-        "dias_atraso": dias_atraso,
         "telefono": cliente.telefono or "",
         "email": cliente.email or "",
+        # Catálogo: Cliente
+        "cliente_nombre": cliente.nombre or "",
+        "cliente_documento": cliente.cedula or "",
+        "cliente_telefono": cliente.telefono or "",
+        "cliente_direccion": cliente.direccion or "",
+        # Catálogo: Préstamo
+        "prestamo_id": prestamo.id,
+        "prestamo_monto": prestamo_monto_fmt,
+        "prestamo_saldo": prestamo_saldo_fmt,
+        "prestamo_fecha_inicio": prestamo.fecha_prestamo.strftime("%d/%m/%Y")
+        if prestamo.fecha_prestamo else "",
+        "prestamo_cuotas": prestamo.numero_cuotas,
+        # Catálogo: Cuota
+        "cuota_id": cuota.id,
+        "cuota_numero": cuota.numero_cuota,
+        "cuota_valor": monto_fmt,
+        "cuota_fecha_vencimiento": fecha_venc_fmt,
+        "cuota_saldo": monto_fmt,
+        "cuota_mora": mora_fmt,
+        # Otros
+        "dias_para_vencer": dias_para_vencer,
+        "dias_atraso": dias_atraso,
     }
 
 
 def proximos_vencimientos(db: Session, dias_anticipacion: int) -> list[RecordatorioCuotaResponse]:
     """Cuotas próximas a vencer con mensaje y enlace de WhatsApp (ruta compartida)."""
+    from app.services.configuracion import obtener_nombre_empresa
+
     hoy, filas = _consulta(db, "proximos", dias_anticipacion)
+    empresa = obtener_nombre_empresa(db)
     resultado = []
 
     for cuota, prestamo, cliente in filas:
         contexto = _contexto(cuota, prestamo, cliente, hoy)
         mensaje = (
             f"Hola {contexto['nombre']}\n"
-            f"Recuerda que se acerca la fecha de pago de tu cuota con Credifast 💸\n"
+            f"Recuerda que se acerca la fecha de pago de tu cuota con {empresa} 💸\n"
             f"👉Cuota {contexto['monto']}\n"
             f"📆 Fecha límite : {contexto['fecha']}\n\n"
             f"Puedes hacer el pago por transferencia o programar recogida"
@@ -211,6 +256,7 @@ def enviar(db: Session, plantilla_id: int, tipo: str, dias: int) -> dict:
             destinatario=destino,
             contexto=contexto,
             dedupe_clave=f"recordatorio:{tipo}:{cuota.id}:{hoy_iso}",
+            cliente_id=cliente.id,
         )
         estado = resultado.get("estado", "fallido")
         conteo[mapa_estado.get(estado, "fallidos")] += 1

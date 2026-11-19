@@ -16,6 +16,9 @@ def registrar_auditoria(
     valores_nuevos: Optional[dict] = None,
     descripcion: Optional[str] = None,
     ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+    request_id: Optional[str] = None,
+    resultado: Optional[str] = None,
 ):
     """Registra una entrada en la tabla auditoria resolviendo el ID de forma segura."""
     id_numerico: Optional[int] = None
@@ -40,6 +43,9 @@ def registrar_auditoria(
         descripcion=descripcion,
         ip_address=ip_address,
         fecha=datetime.utcnow(),
+        user_agent=(user_agent or None) and str(user_agent)[:255],
+        request_id=request_id,
+        resultado=resultado,
     )
     db.add(auditoria)
     db.commit()

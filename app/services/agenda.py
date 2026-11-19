@@ -165,7 +165,10 @@ def actualizar_tipo_cita(db: Session, tipo_cita_id: int, datos: TipoCitaUpdate) 
 
 def eliminar_tipo_cita(db: Session, tipo_cita_id: int) -> None:
     tipo = _get_tipo_cita(db, tipo_cita_id)
-    en_uso = db.query(EventoAgenda).filter(EventoAgenda.tipo_cita_id == tipo_cita_id).count()
+    # El conteo de uso solo considera eventos del propio usuario.
+    en_uso = aplicar_filtro_usuario(db.query(EventoAgenda), EventoAgenda).filter(
+        EventoAgenda.tipo_cita_id == tipo_cita_id
+    ).count()
     if en_uso:
         raise HTTPException(
             status_code=400,

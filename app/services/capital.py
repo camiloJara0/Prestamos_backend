@@ -8,24 +8,31 @@ from datetime import date
 
 from app.models.models import MovimientoCapital, Capital
 from app.schemas.capital import MovimientoCapitalCreate
-from app.core.context import aplicar_filtro_usuario
+from app.core.context import aplicar_filtro_usuario, usuario_actual_id
 from app.utils.pagination import paginate
 
 def get_or_create_capital(db: Session) -> Capital:
     capital = aplicar_filtro_usuario(db.query(Capital), Capital).first()
     if not capital:
-        capital = Capital(monto_total=0.0)
+        capital = Capital(monto_total=0.0, usuario_id=usuario_actual_id.get())
         db.add(capital)
         db.commit()
         db.refresh(capital)
     return capital
+
+def capital_de_usuario(db: Session, usuario_id: int | None) -> Capital | None:
+    """Capital del dueño indicado (propietario del préstamo/pago)."""
+    if usuario_id is None:
+        return None
+    return db.query(Capital).filter(Capital.usuario_id == usuario_id).first()
 
 def registrar_movimiento(db: Session, movimiento: MovimientoCapitalCreate, usuario_id: Optional[int] = None, ip_address: Optional[str] = None):
     if movimiento.tipo_movimiento not in ["inversion", "retiro"]:
         raise HTTPException(status_code=400, detail="Tipo de movimiento debe ser inversion o retiro")
     if not movimiento.descripcion or not movimiento.descripcion.strip():
         raise HTTPException(status_code=422, detail="El concepto del movimiento es obligatorio")
-    
+
+    dueño = usuario_id if isinstance(usuario_id, int) else usuario_actual_id.get()
     capital = get_or_create_capital(db)
 
     if movimiento.tipo_movimiento == "retiro":
@@ -39,7 +46,8 @@ def registrar_movimiento(db: Session, movimiento: MovimientoCapitalCreate, usuar
         tipo_movimiento=movimiento.tipo_movimiento,
         descripcion=movimiento.descripcion,
         valor=movimiento.valor,
-        fecha=movimiento.fecha
+        fecha=movimiento.fecha,
+        usuario_id=dueño
     )
     db.add(db_movimiento)
     db.commit()

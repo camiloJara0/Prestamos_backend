@@ -32,6 +32,7 @@ def generar_recibo_pdf_bytes(datos: dict) -> io.BytesIO:
     - monto_pagado, fecha_pago, metodo_pago
     - estado_pago (confirmado / devuelto)
     - fecha_devolucion, motivo_devolucion (opcionales)
+    - nombre_empresa (opcional; default LoanSoft)
     """
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -68,9 +69,10 @@ def generar_recibo_pdf_bytes(datos: dict) -> io.BytesIO:
     label_style = ParagraphStyle('LabelStyle', fontSize=10, textColor=colors.HexColor('#334155'))
     val_style = ParagraphStyle('ValStyle', fontSize=10, textColor=colors.HexColor('#0F172A'))
 
-    # Encabezado del soporte contable
+    # Encabezado del soporte contable (nombre configurable de la empresa)
+    nombre_empresa = (datos.get("nombre_empresa") or "LoanSoft").strip() or "LoanSoft"
     story.append(Paragraph("<b>COMPROBANTE DE INGRESO / RECIBO DE PAGO</b>", titulo_style))
-    story.append(Paragraph("Soporte Oficial de Recaudo — Credifast", subtitulo_style))
+    story.append(Paragraph(f"Soporte Oficial de Recaudo — {nombre_empresa}", subtitulo_style))
     story.append(Spacer(1, 5))
 
     # Formatear el monto en formato moneda ($100.000)

@@ -32,13 +32,21 @@ def listar_usuarios(
 ):
     return service.get_usuarios(db, page=page, limit=limit)
 
+def _admin_id(admin: dict) -> int | None:
+    """ID numérico del administrador autenticado (payload del token)."""
+    try:
+        return int(admin["id"]) if admin.get("id") is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 @router.post("/", response_model=schemas.UsuarioOut, status_code=status.HTTP_201_CREATED)
 def crear_usuario(
     usuario: schemas.UsuarioCreate,
     db: Session = Depends(get_db),
     admin: dict = Depends(verificar_admin)
 ):
-    return service.create_usuario(db, usuario)
+    return service.create_usuario(db, usuario, admin_id=_admin_id(admin))
 
 @router.get("/{usuario_id}", response_model=schemas.UsuarioOut)
 def obtener_usuario(
@@ -58,7 +66,7 @@ def actualizar_usuario(
     db: Session = Depends(get_db),
     admin: dict = Depends(verificar_admin)
 ):
-    return service.update_usuario(db, usuario_id, usuario)
+    return service.update_usuario(db, usuario_id, usuario, admin_id=_admin_id(admin))
 
 @router.delete("/{usuario_id}")
 def eliminar_usuario(
@@ -66,5 +74,5 @@ def eliminar_usuario(
     db: Session = Depends(get_db),
     admin: dict = Depends(verificar_admin)
 ):
-    service.delete_usuario(db, usuario_id)
+    service.delete_usuario(db, usuario_id, admin_id=_admin_id(admin))
     return {"message": "Usuario desactivado exitosamente."}

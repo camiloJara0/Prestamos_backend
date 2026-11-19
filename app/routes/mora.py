@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 from app.db.database import SessionLocal
-from app.dependencies.auth import get_current_user
+from app.dependencies.auth import get_current_user, get_usuario_id
 from app.services.mora import procesar_moras, get_moras, get_moras_prestamo, get_mora, update_mora, delete_mora
 from app.schemas.mora import MoraOut, MoraUpdate
 from app.schemas.pagination import PaginatedResponse
@@ -67,7 +67,7 @@ def editar_mora(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Acceso denegado. Requiere rol de administrador."
         )
-    mora = update_mora(db, mora_id, payload, usuario_id=current_user.get("sub"), ip_address=_ip(request))
+    mora = update_mora(db, mora_id, payload, usuario_id=get_usuario_id(current_user), ip_address=_ip(request))
     if not mora:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -88,7 +88,7 @@ def eliminar_mora(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Acceso denegado. Requiere rol de administrador."
         )
-    mora = delete_mora(db, mora_id, usuario_id=current_user.get("sub"), ip_address=_ip(request))
+    mora = delete_mora(db, mora_id, usuario_id=get_usuario_id(current_user), ip_address=_ip(request))
     if not mora:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -102,7 +102,7 @@ def procesar_moras_manual(
     current_user: dict = Depends(get_current_user)
 ):
     """Ejecuta manualmente el cálculo de moras. Exclusivo para administradores."""
-    if current_user.get("rol") != "prestamista":
+    if current_user.get("rol") == "usuario":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Acceso denegado. Requiere rol de administrador."

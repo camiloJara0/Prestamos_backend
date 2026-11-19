@@ -9,6 +9,7 @@ from app.routes import (
     agenda,
     auditoria,
     auth,
+    backoffice,
     capital,
     clientes,
     conciliacion,
@@ -30,6 +31,7 @@ from app.routes import (
     tipo_pago,
     tipo_prestamo,
     usuarios,
+    whatsapp,
 )
 
 load_dotenv()
@@ -41,6 +43,18 @@ async def lifespan(app: FastAPI):
     iniciar_scheduler()  # <-- Inicia el scheduler al arrancar la app
     yield
     scheduler.shutdown()  # <-- Detiene el scheduler limpiamente al apagar la app
+    # Vuelca las métricas acumuladas en memoria antes de morir.
+    try:
+        from app.core.observabilidad import volcar_metricas
+        from app.db.database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            volcar_metricas(db)
+        finally:
+            db.close()
+    except Exception:  # noqa: BLE001 - el cierre nunca debe fallar
+        pass
 
 
 app = FastAPI(lifespan=lifespan, title="Sistema de Préstamos")
@@ -64,6 +78,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Request-ID"],
 )
 
 # Contexto de usuario por request (aislamiento multiusuario). Debe ir después
@@ -71,6 +86,50 @@ app.add_middleware(
 from app.core.middleware import ContextoUsuarioMiddleware
 
 app.add_middleware(ContextoUsuarioMiddleware)
+
+# Backoffice: request-id de correlación + métricas de peticiones/latencia.
+# Se registra el último (externo) para heredar el ContextVar a toda la request.
+from app.core.observabilidad import ObservabilidadMiddleware, capturar_excepcion
+
+app.add_middleware(ObservabilidadMiddleware)
+
+
+# ---------------------------------------------------------------------------
+# Backoffice: captura de errores (5xx) en `errores_app`. Mejor esfuerzo:
+# registrar el incidente nunca altera la respuesta original.
+# ---------------------------------------------------------------------------
+from fastapi import HTTPException
+from fastapi.responses import JSONResponse
+
+
+@app.exception_handler(Exception)
+async def handler_excepcion_global(request: Request, exc: Exception):
+    capturar_excepcion(request, exc)
+    request_id = None
+    try:
+        from app.core.observabilidad import obtener_request_id
+
+        request_id = obtener_request_id()
+    except Exception:  # noqa: BLE001
+        pass
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "Error interno del servidor.",
+            "request_id": request_id,
+        },
+    )
+
+
+@app.exception_handler(HTTPException)
+async def handler_http_exception(request: Request, exc: HTTPException):
+    if exc.status_code >= 500:
+        capturar_excepcion(request, exc)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers=getattr(exc, "headers", None),
+    )
 
 # RF-074 · Cabeceras de seguridad y política de contenidos.
 CABECERAS_SEGURIDAD = {
@@ -167,3 +226,9 @@ app.include_router(pasarela.router)
 app.include_router(agenda.router)
 app.include_router(agenda.router_prestamos)
 app.include_router(onboarding.router)
+
+# Backoffice (consola interna): routers con permisos propios.
+for _router in backoffice.routers:
+    app.include_router(_router)
+
+app.include_router(whatsapp.router)

@@ -1,3 +1,5 @@
+import os
+
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
@@ -163,6 +165,35 @@ def actualizar_configuracion(db: Session, clave: str, datos: ConfiguracionUpdate
     db.refresh(registro)
     registro.origen = "usuario"
     return registro
+
+
+def obtener_nombre_empresa(db: Session) -> str:
+    """Nombre de la empresa para documentos y comunicaciones.
+
+    Se resuelve en cascada: override del usuario (cada prestamista puede
+    personalizarla) → global → 'LoanSoft'. Se usa en PDFs, Excel/CSV,
+    comprobantes, contratos, reportes, plantillas y mensajes de WhatsApp.
+    """
+    try:
+        valor, _ = resolver_parametro(db, "nombre_empresa", "LoanSoft")
+        return (valor or "LoanSoft").strip() or "LoanSoft"
+    except Exception:  # noqa: BLE001 - el documento nunca debe fallar por esto
+        return "LoanSoft"
+
+
+def obtener_telefono_empresa(db: Session) -> str:
+    """Teléfono de la empresa para mensajes y documentos.
+
+    Cascada: override del usuario → global → variable de entorno
+    EMPRESA_TELEFONO → cadena vacía.
+    """
+    try:
+        valor, _ = resolver_parametro(db, "empresa_telefono", "")
+        if valor and str(valor).strip():
+            return str(valor).strip()
+    except Exception:  # noqa: BLE001
+        pass
+    return (os.getenv("EMPRESA_TELEFONO") or "").strip()
 
 
 def _validar_valor(tipo_valor: str, valor: str) -> str:

@@ -47,3 +47,7 @@ class PlantillaPreviewOut(BaseModel):
     asunto: str
     cuerpo: str
     variables: list[str]
+    # Ejemplo renderizado con valores representativos (panel de ayuda).
+    cuerpo_ejemplo: Optional[str] = None
+    # Variables usadas que no pertenecen al catálogo conocido.
+    variables_no_reconocidas: list[str] = Field(default_factory=list)

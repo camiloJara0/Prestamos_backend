@@ -13,7 +13,58 @@ from app.core.security import (
 from app.models.models import Token, Usuario
 
 
-def login_usuario(db: Session, email: str, password: str) -> dict:
+def _parametro_int(db: Session, clave: str, default: int) -> int:
+    """Lectura de un parámetro global de configuración como entero."""
+    try:
+        from app.services.configuracion import resolver_parametro
+
+        valor, _ = resolver_parametro(db, clave, str(default))
+        return int(valor) if valor is not None else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _contexto_auditoria(ip_address, user_agent, request_id) -> dict:
+    return {
+        "ip_address": ip_address,
+        "user_agent": user_agent,
+        "request_id": request_id,
+    }
+
+
+def login_usuario(
+    db: Session,
+    email: str,
+    password: str,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+    request_id: str | None = None,
+) -> dict:
+    # Rate limit por IP + correo (RF de fuerza bruta). Los intentos
+    # bloqueados también quedan auditados.
+    from app.services.rate_limit import verificar_rate_limit
+
+    max_intentos = _parametro_int(db, "login_max_intentos", 10)
+    ventana_min = _parametro_int(db, "login_ventana_min", 15)
+    try:
+        verificar_rate_limit(
+            f"login:{ip_address or 'sin-ip'}:{email.lower()}",
+            maximo=max_intentos,
+            ventana_segundos=ventana_min * 60,
+        )
+    except HTTPException:
+        from app.services.auditoria import registrar_auditoria
+
+        registrar_auditoria(
+            db,
+            tabla_afectada="usuarios",
+            tipo_operacion="login_bloqueado",
+            descripcion=f"Rate limit de login superado: {email}",
+            resultado="fallido",
+            **_contexto_auditoria(ip_address, user_agent, request_id),
+        )
+        raise
+
     usuario = (
         db.query(Usuario)
         .filter(Usuario.email == email, Usuario.estado == "activo")
@@ -21,6 +72,18 @@ def login_usuario(db: Session, email: str, password: str) -> dict:
     )
 
     if not usuario or not verify_password(password, usuario.hashed_password):
+        from app.services.auditoria import registrar_auditoria
+
+        registrar_auditoria(
+            db,
+            tabla_afectada="usuarios",
+            tipo_operacion="login_fallido",
+            usuario_id=usuario.id if usuario else None,
+            registro_id=usuario.id if usuario else None,
+            descripcion=f"Credenciales incorrectas o usuario inactivo: {email}",
+            resultado="fallido",
+            **_contexto_auditoria(ip_address, user_agent, request_id),
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Credenciales incorrectas o usuario inactivo.",
@@ -45,15 +108,79 @@ def login_usuario(db: Session, email: str, password: str) -> dict:
         refresh_token=refresh_token,
         activo=1,
         expires_at=expires_at,
+        ip_address=ip_address,
+        user_agent=(user_agent or None) and str(user_agent)[:255],
     )
     db.add(db_token)
+    # Primero se persiste la credencial NUEVA: cualquier fallo posterior deja
+    # al usuario con una sesión válida.
     db.commit()
+    db.refresh(db_token)
+
+    # Política de sesiones: conservar las N activas más recientes (la nueva
+    # siempre está entre ellas) y purgar tokens expirados de este usuario.
+    revocadas = _limitar_sesiones(db, usuario.id, sesiones_maximas=_parametro_int(db, "sesiones_maximas", 5))
+
+    from app.services.auditoria import registrar_auditoria
+
+    if revocadas:
+        registrar_auditoria(
+            db,
+            tabla_afectada="tokens",
+            tipo_operacion="revocacion_sesiones",
+            usuario_id=usuario.id,
+            registro_id=db_token.id,
+            descripcion=f"{revocadas} sesiones anteriores revocadas por límite de sesiones",
+            resultado="ok",
+            **_contexto_auditoria(ip_address, user_agent, request_id),
+        )
+    registrar_auditoria(
+        db,
+        tabla_afectada="usuarios",
+        tipo_operacion="login",
+        usuario_id=usuario.id,
+        registro_id=usuario.id,
+        descripcion=f"Inicio de sesión exitoso: {email}",
+        resultado="ok",
+        **_contexto_auditoria(ip_address, user_agent, request_id),
+    )
 
     return {
         "access_token": access_token,
         "refresh_token": refresh_token,
         "token_type": "bearer",
     }
+
+
+def _limitar_sesiones(db: Session, usuario_id: int, sesiones_maximas: int = 5) -> int:
+    """Purga tokens expirados y revoca activos que excedan el límite.
+
+    Devuelve el número de sesiones revocadas. La sesión recién creada nunca
+    se revoca (es la más reciente).
+    """
+    ahora = datetime.now(timezone.utc).replace(tzinfo=None)
+    eliminados = (
+        db.query(Token)
+        .filter(Token.usuario_id == usuario_id, Token.expires_at < ahora)
+        .delete(synchronize_session=False)
+    )
+
+    activos = (
+        db.query(Token)
+        .filter(Token.usuario_id == usuario_id, Token.activo == 1)
+        .order_by(Token.created_at.desc(), Token.id.desc())
+        .all()
+    )
+    excedentes = activos[max(int(sesiones_maximas), 1):]
+    revocadas = 0
+    for token in excedentes:
+        token.activo = 0
+        revocadas += 1
+    db.commit()
+    if eliminados:
+        # Solo informativo; no se registran valores de tokens.
+        pass
+    return revocadas
 
 
 def refrescar_token(db: Session, refresh_token: str) -> dict:
@@ -84,12 +211,19 @@ def refrescar_token(db: Session, refresh_token: str) -> dict:
     nuevo_access_token = create_access_token(data=data_token)
 
     db_token.access_token = nuevo_access_token
+    db_token.ultimo_uso_at = datetime.utcnow()
     db.commit()
 
     return {"access_token": nuevo_access_token, "token_type": "bearer"}
 
 
-def logout_usuario(db: Session, refresh_token: str) -> bool:
+def logout_usuario(
+    db: Session,
+    refresh_token: str,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+    request_id: str | None = None,
+) -> bool:
     db_token = (
         db.query(Token)
         .filter(
@@ -101,14 +235,33 @@ def logout_usuario(db: Session, refresh_token: str) -> bool:
     )
 
     if db_token:
+        usuario_id = db_token.usuario_id
         db_token.activo = 0
         db.commit()
+        from app.services.auditoria import registrar_auditoria
+
+        registrar_auditoria(
+            db,
+            tabla_afectada="usuarios",
+            tipo_operacion="logout",
+            usuario_id=usuario_id,
+            registro_id=usuario_id,
+            descripcion="Cierre de sesión",
+            resultado="ok",
+            **_contexto_auditoria(ip_address, user_agent, request_id),
+        )
         return True
     return False
 
 
 def cambiar_password(
-    db: Session, usuario_id: int, password_actual: str, password_nuevo: str
+    db: Session,
+    usuario_id: int,
+    password_actual: str,
+    password_nuevo: str,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+    request_id: str | None = None,
 ) -> bool:
     usuario = (
         db.query(Usuario)
@@ -136,10 +289,29 @@ def cambiar_password(
     ).update({"activo": 0})
 
     db.commit()
+
+    from app.services.auditoria import registrar_auditoria
+
+    registrar_auditoria(
+        db,
+        tabla_afectada="usuarios",
+        tipo_operacion="cambio_password",
+        usuario_id=usuario.id,
+        registro_id=usuario.id,
+        descripcion="Cambio de contraseña propio; sesiones anteriores revocadas",
+        resultado="ok",
+        **_contexto_auditoria(ip_address, user_agent, request_id),
+    )
     return True
 
 
-def solicitar_reset_password(db: Session, email: str) -> str:
+def solicitar_reset_password(
+    db: Session,
+    email: str,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+    request_id: str | None = None,
+) -> str:
     usuario = (
         db.query(Usuario)
         .filter(Usuario.email == email, Usuario.estado == "activo")
@@ -157,6 +329,20 @@ def solicitar_reset_password(db: Session, email: str) -> str:
     usuario.reset_token_expires = ahora + timedelta(hours=1)
 
     db.commit()
+
+    from app.services.auditoria import registrar_auditoria
+
+    # Nunca se registra el valor del token.
+    registrar_auditoria(
+        db,
+        tabla_afectada="usuarios",
+        tipo_operacion="solicitud_reset_password",
+        usuario_id=usuario.id,
+        registro_id=usuario.id,
+        descripcion="Solicitud de restablecimiento de contraseña",
+        resultado="ok",
+        **_contexto_auditoria(ip_address, user_agent, request_id),
+    )
 
     _enviar_correo_reset(usuario, reset_token)
     return mensaje_estandar
@@ -189,7 +375,14 @@ def _enviar_correo_reset(usuario: Usuario, reset_token: str) -> None:
     enviar_correo(usuario.email, asunto, html, texto_plano=texto)
 
 
-def resetear_password(db: Session, token: str, new_password: str) -> bool:
+def resetear_password(
+    db: Session,
+    token: str,
+    new_password: str,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+    request_id: str | None = None,
+) -> bool:
     ahora = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
 
     usuario = db.query(Usuario).filter(Usuario.reset_token == token).first()
@@ -214,4 +407,17 @@ def resetear_password(db: Session, token: str, new_password: str) -> bool:
     ).update({"activo": 0})
 
     db.commit()
+
+    from app.services.auditoria import registrar_auditoria
+
+    registrar_auditoria(
+        db,
+        tabla_afectada="usuarios",
+        tipo_operacion="reset_password",
+        usuario_id=usuario.id,
+        registro_id=usuario.id,
+        descripcion="Contraseña restablecida por enlace de recuperación; sesiones revocadas",
+        resultado="ok",
+        **_contexto_auditoria(ip_address, user_agent, request_id),
+    )
     return True

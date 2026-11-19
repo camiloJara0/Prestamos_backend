@@ -45,7 +45,13 @@ def _scoring_piloto(db: Session, cliente_id: int) -> tuple[float, str, str | Non
     if not cliente:
         raise ValueError("cliente no encontrado")
 
-    prestamos = db.query(Prestamo).filter(Prestamo.cliente_id == cliente_id).all()
+    # Aislamiento: el historial crediticio solo considera préstamos del
+    # prestamista que evalúa (los ajenos no influyen en su puntaje).
+    dueño = cliente.usuario_id
+    prestamos = db.query(Prestamo).filter(
+        Prestamo.cliente_id == cliente_id,
+        Prestamo.usuario_id == dueño,
+    ).all()
     pagados = sum(1 for p in prestamos if p.estado == "pagado")
     perdidos = sum(1 for p in prestamos if p.estado == "perdido")
     activos = sum(1 for p in prestamos if p.estado == "activo")
@@ -55,6 +61,7 @@ def _scoring_piloto(db: Session, cliente_id: int) -> tuple[float, str, str | Non
         .join(Prestamo)
         .filter(
             Prestamo.cliente_id == cliente_id,
+            Prestamo.usuario_id == dueño,
             PrestamoCuota.estado.in_(["vencido", "parcial"]),
         )
         .count()
@@ -62,7 +69,11 @@ def _scoring_piloto(db: Session, cliente_id: int) -> tuple[float, str, str | Non
     moras_activas = (
         db.query(Mora)
         .join(Prestamo)
-        .filter(Prestamo.cliente_id == cliente_id, Mora.estado != "pagada")
+        .filter(
+            Prestamo.cliente_id == cliente_id,
+            Prestamo.usuario_id == dueño,
+            Mora.estado != "pagada",
+        )
         .count()
     )
 

@@ -168,7 +168,8 @@ async def procesar_extracto_bancario(
                         cuota_id=cuota.id,
                         fecha_pago=date.today(),
                         valor_pagado=monto_extraido,
-                        observaciones=f"Conciliación Automática Extracto. Ref: {cuota.referencia_pago}"
+                        observaciones=f"Conciliación Automática Extracto. Ref: {cuota.referencia_pago}",
+                        usuario_id=prestamo.usuario_id
                     )
                     db.add(nuevo_pago)
                     db.commit()

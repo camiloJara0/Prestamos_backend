@@ -1,0 +1,61 @@
+{
+  "modulo": "plantillas_recordatorios_whatsapp",
+  "fecha": "2026-11-18",
+  "resumen_pruebas": {
+    "verif_mensajeria": "40 OK / 0 FAIL",
+    "verif_aislamiento": "69 OK / 0 FAIL",
+    "verif_backoffice": "59 OK / 0 FAIL",
+    "verif_roles": "28 OK / 0 FAIL",
+    "verif_landing": "17 OK / 0 FAIL",
+    "total": "213 checks OK"
+  },
+  "cambios": {
+    "canal_principal": [
+      "PLANTILLAS_POR_DEFECTO migrada a WhatsApp: 7 plantillas WhatsApp (recordatorio_vencimiento, recordatorio_gracia, prestamo_creado, pago_confirmado, mora_aviso, cliente_bienvenida, solicitud_decidida) + 2 email",
+      "PLANTILLAS_SMS_RETIRADAS documenta el conjunto SMS retirado; reactivarlo = restaurar entradas en la lista (arquitectura flexible)",
+      "Migracion _asegurar_plantillas_whatsapp: siembra WhatsApp a prestamistas existentes y DESACTIVA (no elimina) las plantillas base SMS heredadas",
+      "envios_mensaje.estado pasa de ENUM con CHECK a String(30) para admitir pendiente/entregado/leido (migracion con reconstruccion de tabla en SQLite)",
+      "eventos_mensajeria: pago_confirmado/mora_aviso/bienvenida/prestamo_creado usan canal WhatsApp; _correo_prestamo_creado envia texto directo (sin plantilla email eliminada)",
+      "scheduler: aviso al cliente por WhatsApp antes del vencimiento, el MISMO DIA y durante el periodo de gracia (recordatorio_gracia)"
+    ],
+    "variables_dinamicas": [
+      "CATALOGO_VARIABLES agrupado por categoria (Cliente/Préstamo/Cuota/Empresa/Otros) con descripcion y ejemplo renderizado",
+      "GET /plantillas/variables y GET /whatsapp/variables",
+      "Variables canonicas en el contexto de render (cliente_nombre/documento/telefono/direccion, prestamo_id/monto/saldo/fecha_inicio/cuotas, cuota_numero/valor/fecha_vencimiento/saldo, empresa_nombre/telefono) + compatibilidad historica",
+      "previsualizar devuelve cuerpo_ejemplo (con valores de ejemplo) y variables_no_reconocidas (validacion de variables inexistentes)"
+    ],
+    "credenciales_whatsapp": [
+      "Modelo CredencialesWhatsApp por usuario (proveedor, access_token, phone_number_id, business_account_id, api_key, estado_conexion, ultima_validacion)",
+      "GET/PUT/DELETE /whatsapp/credenciales (token NUNCA se devuelve completo: mascarado)",
+      "POST /whatsapp/probar-conexion: verificacion en tiempo real contra la Cloud API de Meta con detalle de error",
+      "enviar_whatsapp_directo resuelve modo: credenciales propias del prestamista (Modo 2) o corporativas del entorno (Modo 1)"
+    ],
+    "recordatorios_gracia": [
+      "_consulta('proximos') ahora incluye cuotas vencidas DENTRO del periodo de gracia (hoy-gracia .. hoy-1) y excluye automaticamente las de gracia expirada",
+      "dias_gracia_mora configurable por usuario (override) y global; verificado con override a 0"
+    ],
+    "envios_reales": [
+      "Individual manual: POST /whatsapp/enviar (desde ficha de cliente y de prestamo en el frontend), con variables renderizadas",
+      "Masivo: POST /whatsapp/enviar-masivo por segmento (proximos/vencidos) con plantilla WhatsApp",
+      "Eventos automaticos: confirmacion de pago + comprobante PDF adjunto automatico, resumen inicial al crear prestamo, avisos de mora, bienvenida, recordatorios programados (antes/mismo dia/gracia)",
+      "Comprobante PDF extraido a services/comprobante.py para reuso por eventos"
+    ],
+    "trazabilidad": [
+      "envios_mensaje + cliente_id, whatsapp_message_id, respuesta_proveedor, error_detalle",
+      "Estados: pendiente/enviado/entregado/leido/omitido/fallido",
+      "GET /whatsapp/envios: historial aislado por usuario con todos los campos"
+    ],
+    "frontend": [
+      "PlantillasPanel: panel lateral de variables agrupadas por categoria con insercion al cursor y copia al portapapeles, vista previa en tiempo real con valores de ejemplo y advertencia de variables no reconocidas; WhatsApp como canal por defecto",
+      "WhatsAppPanel (nueva pestana en Notificaciones): credenciales propias, probar conexion con estado y detalle de error",
+      "Ficha de cliente y ficha de prestamo: boton de envio manual por WhatsApp con validacion de telefono",
+      "RecordatoriosPanel: plantilla WhatsApp por defecto"
+    ]
+  },
+  "bugs_encontrados_y_corregidos_durante_las_pruebas": [
+    "obtener_telefono_empresa lanzaba NameError (falta import os) y silenciaba el nombre de empresa en plantillas",
+    "previsualizar no inyectaba variables de empresa (llamaba al servicio sin db)",
+    "guard de rol incorrecto en /mora/procesar-manual ya corregido en lote anterior de aislamiento"
+  ],
+  "scripts": "verif_mensajeria.py / verif_aislamiento.py / verif_backoffice.py / verif_roles.py / verif_landing.py (Temp/opencode, re-ejecutables con workdir backend)"
+}

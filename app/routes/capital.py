@@ -11,7 +11,7 @@ from app.services.capital import (
     get_movimientos_capital,
     get_resumen_caja,
 )
-from app.dependencies.auth import get_current_user, require_rol
+from app.dependencies.auth import get_current_user, require_rol, get_usuario_id
 
 router = APIRouter(prefix="/capital", tags=["Capital"])
 
@@ -31,7 +31,7 @@ def crear_movimiento(
 ):
     return registrar_movimiento(
         db, movimiento,
-        usuario_id=current_user.get("sub"),
+        usuario_id=get_usuario_id(current_user),
         ip_address=request.client.host if request.client else None,
     )
 

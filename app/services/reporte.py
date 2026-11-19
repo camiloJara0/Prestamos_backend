@@ -439,6 +439,9 @@ def get_reporte_pagos(db: Session, desde: Optional[date] = None, hasta: Optional
 
 
 def exportar_excel(db: Session, tipo: str, desde: Optional[date] = None, hasta: Optional[date] = None, tipo_pago_id: Optional[int] = None):
+    from app.services.configuracion import obtener_nombre_empresa
+
+    empresa = obtener_nombre_empresa(db)
     MORADO_OSCURO = "5B2D8E"
     MORADO_MEDIO = "7B3FC4"
     MORADO_CLARO = "F5F0FF"
@@ -495,7 +498,7 @@ def exportar_excel(db: Session, tipo: str, desde: Optional[date] = None, hasta: 
         ws.column_dimensions['A'].width = 35
         ws.column_dimensions['B'].width = 25
 
-        estilo_titulo(ws, "SISTEMA DE GESTIÓN DE PRÉSTAMOS", 1)
+        estilo_titulo(ws, f"SISTEMA DE GESTIÓN DE PRÉSTAMOS — {empresa}", 1)
         ws.row_dimensions[2].height = 10
 
         for celda, texto in [("A3", "CONCEPTO"), ("B3", "VALOR (COP)")]:
@@ -547,7 +550,7 @@ def exportar_excel(db: Session, tipo: str, desde: Optional[date] = None, hasta: 
         for col, ancho in zip("ABCDE", (22, 26, 16, 20, 20)):
             ws.column_dimensions[col].width = ancho
 
-        estilo_titulo(ws, "SISTEMA DE GESTIÓN DE PRÉSTAMOS", 1, cols=5)
+        estilo_titulo(ws, f"SISTEMA DE GESTIÓN DE PRÉSTAMOS — {empresa}", 1, cols=5)
         ws.row_dimensions[2].height = 10
 
         resumen = [
@@ -613,7 +616,7 @@ def exportar_excel(db: Session, tipo: str, desde: Optional[date] = None, hasta: 
         for col, ancho in zip("ABCDEF", (22, 22, 16, 18, 16, 20)):
             ws.column_dimensions[col].width = ancho
 
-        estilo_titulo(ws, "SISTEMA DE GESTIÓN DE PRÉSTAMOS", 1, cols=6)
+        estilo_titulo(ws, f"SISTEMA DE GESTIÓN DE PRÉSTAMOS — {empresa}", 1, cols=6)
         ws.row_dimensions[2].height = 10
 
         for celda, texto in [("A3", "CONCEPTO"), ("B3", "VALOR (COP)")]:
@@ -666,7 +669,7 @@ def exportar_excel(db: Session, tipo: str, desde: Optional[date] = None, hasta: 
         for col, ancho in zip("ABCDEF", (24, 16, 16, 16, 14, 18)):
             ws.column_dimensions[col].width = ancho
 
-        estilo_titulo(ws, "SISTEMA DE GESTIÓN DE PRÉSTAMOS", 1, cols=6)
+        estilo_titulo(ws, f"SISTEMA DE GESTIÓN DE PRÉSTAMOS — {empresa}", 1, cols=6)
         ws.row_dimensions[2].height = 10
 
         for celda, texto in [("A3", "CONCEPTO"), ("B3", "VALOR (COP)")]:
@@ -743,7 +746,7 @@ def exportar_excel(db: Session, tipo: str, desde: Optional[date] = None, hasta: 
         ws.column_dimensions['C'].width = 22
         ws.column_dimensions['D'].width = 30
 
-        estilo_titulo(ws, "SISTEMA DE GESTIÓN DE PRÉSTAMOS", 1, cols=4)
+        estilo_titulo(ws, f"SISTEMA DE GESTIÓN DE PRÉSTAMOS — {empresa}", 1, cols=4)
         ws.row_dimensions[2].height = 10
 
         ws['A3'] = "Total Pérdidas"
@@ -805,6 +808,9 @@ def exportar_excel(db: Session, tipo: str, desde: Optional[date] = None, hasta: 
     return buffer
 
 def exportar_pdf(db: Session, tipo: str, desde: Optional[date] = None, hasta: Optional[date] = None, tipo_pago_id: Optional[int] = None):
+    from app.services.configuracion import obtener_nombre_empresa
+
+    empresa = obtener_nombre_empresa(db)
     MORADO_OSCURO = colors.HexColor("#5B2D8E")
     MORADO_MEDIO = colors.HexColor("#7B3FC4")
     MORADO_CLARO = colors.HexColor("#F5F0FF")
@@ -857,7 +863,7 @@ def exportar_pdf(db: Session, tipo: str, desde: Optional[date] = None, hasta: Op
 
     # Encabezado solo con titulo
     encabezado_data = [
-        [Paragraph("SISTEMA DE GESTION DE PRESTAMOS", estilo_titulo)],
+        [Paragraph(f"SISTEMA DE GESTION DE PRESTAMOS — {empresa}", estilo_titulo)],
     ]
     tabla_encabezado = Table(encabezado_data, colWidths=[7*inch])
     tabla_encabezado.setStyle(TableStyle([

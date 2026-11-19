@@ -179,47 +179,9 @@ def solicitar_devolucion_pago(
 
 def _construir_datos_recibo(db: Session, cuota: PrestamoCuota, pago_registro: Pago | None) -> dict:
     """Arma los datos del comprobante PDF para una cuota y su pago (RF-043)."""
-    prestamo = db.query(Prestamo).filter(Prestamo.id == cuota.prestamo_id).first()
-    cliente = db.query(Cliente).filter(Cliente.id == prestamo.cliente_id).first()
+    from app.services.comprobante import construir_datos_recibo
 
-    metodo_pago_nombre = "Transferencia / Efectivo"
-
-    if pago_registro and pago_registro.fecha_pago:
-        fecha_bruta = pago_registro.fecha_pago
-    elif cuota.fecha_pago:
-        fecha_bruta = cuota.fecha_pago
-    else:
-        fecha_bruta = cuota.updated_at
-
-    fecha_pago_real = str(fecha_bruta).split("T")[0].split(" ")[0]
-
-    if pago_registro and pago_registro.tipo_pago:
-        metodo_pago_nombre = pago_registro.tipo_pago.nombre
-
-    referencia_recibo = pago_registro.referencia_recibo if pago_registro else f"REC-CUOTA-{cuota.id}"
-
-    datos_recibo = {
-        "referencia_pago": cuota.referencia_pago or f"REF-P{prestamo.id}C{cuota.numero_cuota}",
-        "referencia_recibo": referencia_recibo,
-        "estado_pago": pago_registro.estado_pago if pago_registro else "confirmado",
-        "fecha_pago": fecha_pago_real,
-        "cliente_nombre": cliente.nombre,
-        "cliente_cedula": cliente.cedula,
-        "prestamo_id": prestamo.id,
-        "cuota_numero": cuota.numero_cuota,
-        "monto_pagado": pago_registro.valor_pagado if pago_registro else cuota.valor_cuota,
-        "metodo_pago": metodo_pago_nombre
-    }
-
-    if pago_registro:
-        datos_recibo["capital_pagado"] = pago_registro.capital_pagado
-        datos_recibo["interes_pagado"] = pago_registro.interes_pagado
-        datos_recibo["mora_pagada"] = pago_registro.mora_pagada
-        if pago_registro.estado_pago == "devuelto":
-            datos_recibo["fecha_devolucion"] = str(pago_registro.fecha_devolucion or "")
-            datos_recibo["motivo_devolucion"] = pago_registro.motivo_devolucion
-
-    return datos_recibo
+    return construir_datos_recibo(db, cuota, pago_registro)
 
 
 def _responder_pdf(datos_recibo: dict) -> Response:
@@ -254,6 +216,140 @@ def descargar_recibo_cuota_pdf(
 
     pago_registro = db.query(Pago).filter(Pago.cuota_id == cuota.id).order_by(Pago.id.desc()).first()
     return _responder_pdf(_construir_datos_recibo(db, cuota, pago_registro))
+
+
+# ---------------------------------------------------------------------------
+# Envío del comprobante por WhatsApp (PrestamoPagoModal)
+# ---------------------------------------------------------------------------
+def _enviar_comprobante_whatsapp(db: Session, pago_registro: Pago, current_user: dict) -> dict:
+    from urllib.parse import quote_plus
+
+    from app.core.context import usuario_actual_id, usuario_actual_rol
+    from app.services.canales import enviar_whatsapp_directo
+    from app.services.configuracion import obtener_nombre_empresa
+    from app.services.rate_limit import verificar_rate_limit
+
+    uid = usuario_actual_id.get()
+    verificar_rate_limit(f"comprobante_wa:{uid}", maximo=15, ventana_segundos=60)
+
+    cuota = db.query(PrestamoCuota).filter(PrestamoCuota.id == pago_registro.cuota_id).first()
+    prestamo = (
+        db.query(Prestamo).filter(Prestamo.id == pago_registro.prestamo_id).first()
+    )
+    cliente = (
+        db.query(Cliente).filter(Cliente.id == pago_registro.cliente_id).first()
+    )
+
+    # Validación: el cliente debe tener teléfono registrado para habilitar el envío
+    telefono = "".join(c for c in (cliente.telefono or "") if c.isdigit()) if cliente else ""
+    if not telefono:
+        raise HTTPException(
+            status_code=400,
+            detail="El cliente no tiene número telefónico registrado. Actualiza la ficha del cliente para habilitar el envío.",
+        )
+
+    empresa = obtener_nombre_empresa(db)
+    monto = f"${pago_registro.valor_pagado:,.0f}".replace(",", ".")
+    fecha = str(pago_registro.fecha_pago or "").split("T")[0].split(" ")[0]
+    cuerpo = (
+        f"Hola {cliente.nombre}, te compartimos el comprobante de tu pago.\n"
+        f"Recibo: {pago_registro.referencia_recibo}\n"
+        f"Cuota #{cuota.numero_cuota} del préstamo #{prestamo.id}\n"
+        f"Valor pagado: {monto}\n"
+        f"Fecha: {fecha}\n\n"
+        f"Gracias por tu puntualidad.\n{empresa}"
+    )
+
+    datos_recibo = _construir_datos_recibo(db, cuota, pago_registro)
+    pdf = generar_recibo_pdf_bytes(datos_recibo)
+
+    asunto = f"Comprobante de pago {pago_registro.referencia_recibo}"
+    resultado = enviar_whatsapp_directo(
+        db,
+        destinatario=telefono,
+        cuerpo=cuerpo,
+        documento=pdf.getvalue(),
+        nombre_archivo=f"Comprobante_{pago_registro.referencia_recibo}.pdf",
+        asunto=asunto,
+    )
+
+    from app.services.auditoria import registrar_auditoria
+
+    registrar_auditoria(
+        db,
+        usuario_id=current_user.get("id"),
+        tabla_afectada="envios_mensaje",
+        tipo_operacion="envio_comprobante_whatsapp",
+        registro_id=pago_registro.id,
+        valores_nuevos={"estado": resultado["estado"], "destinatario": telefono},
+        descripcion=(
+            f"Comprobante {pago_registro.referencia_recibo} enviado por WhatsApp "
+            f"al cliente {cliente.nombre} ({resultado['estado']})"
+        ),
+        resultado="ok" if resultado["estado"] == "enviado" else "fallido",
+    )
+
+    # Fallback manual: enlace wa.me para el prestamista si la API no está configurada
+    enlace = ""
+    if resultado["estado"] != "enviado":
+        enlace = f"https://wa.me/{telefono}?text={quote_plus(cuerpo)}"
+
+    return {**resultado, "whatsapp_url": enlace, "destinatario": telefono}
+
+
+@router.post("/{pago_id}/enviar-whatsapp")
+def enviar_comprobante_whatsapp(
+    pago_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """Envía el comprobante PDF del pago por WhatsApp al cliente.
+
+    Requiere teléfono registrado del cliente. El envío queda en el
+    historial de envíos y se puede reenviar cuando se necesite.
+    """
+    pago_registro = aplicar_filtro_usuario(db.query(Pago), Pago).filter(Pago.id == pago_id).first()
+    if not pago_registro:
+        raise HTTPException(status_code=404, detail="El pago especificado no existe.")
+    if pago_registro.estado_pago == "devuelto":
+        raise HTTPException(status_code=400, detail="El pago está devuelto; no se puede enviar su comprobante.")
+
+    return _enviar_comprobante_whatsapp(db, pago_registro, current_user)
+
+
+@router.get("/{pago_id}/envios-whatsapp")
+def historial_envios_comprobante(
+    pago_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """Historial de envíos de WhatsApp del comprobante (permite reenvíos)."""
+    pago_registro = aplicar_filtro_usuario(db.query(Pago), Pago).filter(Pago.id == pago_id).first()
+    if not pago_registro:
+        raise HTTPException(status_code=404, detail="El pago especificado no existe.")
+
+    from app.core.context import usuario_actual_id, usuario_actual_rol
+    from app.models import EnvioMensaje
+
+    uid = usuario_actual_id.get()
+    query = db.query(EnvioMensaje).filter(
+        EnvioMensaje.asunto == f"Comprobante de pago {pago_registro.referencia_recibo}",
+        EnvioMensaje.canal == "whatsapp",
+    )
+    if uid is not None and usuario_actual_rol.get() != "admin":
+        query = query.filter(EnvioMensaje.usuario_id == uid)
+
+    filas = query.order_by(EnvioMensaje.fecha.desc()).limit(20).all()
+    return [
+        {
+            "id": e.id,
+            "fecha": str(e.fecha),
+            "destinatario": e.destinatario,
+            "estado": e.estado,
+            "motivo": e.motivo,
+        }
+        for e in filas
+    ]
 
 
 @router.get("/{pago_id}/comprobante")

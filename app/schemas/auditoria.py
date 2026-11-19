@@ -24,5 +24,8 @@ class AuditoriaOut(BaseModel):
     descripcion: Optional[str] = None
     ip_address: Optional[str] = None
     fecha: datetime
+    user_agent: Optional[str] = None
+    request_id: Optional[str] = None
+    resultado: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)

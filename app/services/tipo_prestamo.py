@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from app.models.models import TipoPrestamo
 from app.schemas.tipo_prestamo import TipoPrestamoCreate, TipoPrestamoUpdate
-from app.core.context import aplicar_filtro_usuario
+from app.core.context import aplicar_filtro_usuario, usuario_actual_id
 from app.utils.pagination import paginate
 
 def get_tipo_prestamos(db: Session, page: int = 1, limit: int = 10):
@@ -13,7 +13,7 @@ def get_tipo_prestamo(db: Session, tipo_prestamo_id: int):
     return aplicar_filtro_usuario(db.query(TipoPrestamo), TipoPrestamo).filter(TipoPrestamo.id == tipo_prestamo_id).first()
 
 def create_tipo_prestamo(db: Session, tipo_prestamo: TipoPrestamoCreate):
-    db_tipo_prestamo = TipoPrestamo(**tipo_prestamo.dict())
+    db_tipo_prestamo = TipoPrestamo(**tipo_prestamo.dict(), usuario_id=usuario_actual_id.get())
     db.add(db_tipo_prestamo)
     db.commit()
     db.refresh(db_tipo_prestamo)

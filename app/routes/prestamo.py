@@ -12,7 +12,7 @@ from app.db.database import SessionLocal
 from app.schemas.prestamo import PrestamoCreate, PrestamoOut, PrestamoDetalleOut, RenovacionCreate, MarcarPerdidoRequest, ReestructuracionCreate, ReestructuracionOut
 from app.schemas.pagination import PaginatedResponse
 from app.services.prestamo import crear_prestamo, get_prestamos, obtener_prestamo, renovar_prestamo, marcar_prestamo_perdido, ajustar_capital_prestamo, reestructurar_prestamo
-from app.dependencies.auth import get_current_user, require_rol
+from app.dependencies.auth import get_current_user, require_rol, get_usuario_id
 from app.services import prestamo as services
 
 router = APIRouter(prefix="/prestamos", tags=["Prestamos"])
@@ -34,7 +34,7 @@ def crear(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    return services.crear_prestamo(db, prestamo, current_user["sub"], ip_address=_ip(request))
+    return services.crear_prestamo(db, prestamo, get_usuario_id(current_user), ip_address=_ip(request))
 
 @router.get("/", response_model=PaginatedResponse[PrestamoOut])
 def listar(
@@ -96,7 +96,7 @@ def renovar(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    return renovar_prestamo(db, prestamo_id, renovacion, usuario_id=current_user.get("sub"), ip_address=_ip(request))
+    return renovar_prestamo(db, prestamo_id, renovacion, usuario_id=get_usuario_id(current_user), ip_address=_ip(request))
 
 @router.post("/{prestamo_id}/marcar_perdido")
 def marcar_perdido(
@@ -106,7 +106,7 @@ def marcar_perdido(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    return marcar_prestamo_perdido(db, prestamo_id, datos, usuario_id=current_user.get("sub"), ip_address=_ip(request))
+    return marcar_prestamo_perdido(db, prestamo_id, datos, usuario_id=get_usuario_id(current_user), ip_address=_ip(request))
 
 @router.put("/{prestamo_id}/ajustar-capital")
 def ajustar_capital(
@@ -118,7 +118,7 @@ def ajustar_capital(
 ):
     prestamo = ajustar_capital_prestamo(
         db, prestamo_id, nuevo_capital,
-        usuario_id=current_user["sub"], ip_address=_ip(request),
+        usuario_id=get_usuario_id(current_user), ip_address=_ip(request),
     )
     return {
         "mensaje": "Capital ajustado exitosamente",
@@ -140,5 +140,5 @@ def reestructurar(
     """Genera un plan de cuotas nuevo para un préstamo en mora (RF-035). Solo administrador."""
     return reestructurar_prestamo(
         db, prestamo_id, datos,
-        usuario_id=current_user["sub"], ip_address=_ip(request),
+        usuario_id=get_usuario_id(current_user), ip_address=_ip(request),
     )

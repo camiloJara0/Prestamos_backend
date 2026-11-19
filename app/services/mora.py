@@ -169,9 +169,10 @@ def get_moras(db: Session, page: int = 1, limit: int = 10):
     }
 
 def get_moras_prestamo(db: Session, prestamo_id: int):
-    """Moras en estado generada de un préstamo, más recientes primero (RF-045)."""
+    """Moras en estado generada de un préstamo, más recientes primero (RF-045).
+    IDOR: filtra por dueño del préstamo (admin ve todas)."""
     return (
-        db.query(Mora)
+        aplicar_filtro_usuario(db.query(Mora).join(Prestamo, Mora.prestamo_id == Prestamo.id), Prestamo)
         .filter(Mora.prestamo_id == prestamo_id, Mora.estado == "generada")
         .order_by(Mora.fecha.desc())
         .all()
@@ -276,13 +277,19 @@ def calcular_mora(db: Session, cuota: PrestamoCuota, pago: Pago = None, tasa_for
         db.commit()
         return mora_existente
     else:
-        # Crear nueva mora
+        # Crear nueva mora (dueño = propietario del préstamo)
+        dueño = (
+            db.query(Prestamo.usuario_id)
+            .filter(Prestamo.id == cuota.prestamo_id)
+            .scalar()
+        )
         mora = Mora(
             prestamo_id=cuota.prestamo_id,
             cuota_id=cuota.id,
             fecha=date.today(),
             valor=valor_mora,
-            estado="generada"
+            estado="generada",
+            usuario_id=dueño
         )
         # Cambiar estado de cuota a vencido
         cuota.estado = "vencido"

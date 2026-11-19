@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, status, HTTPException
+from fastapi import APIRouter, Depends, Request, status, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.database import SessionLocal
@@ -28,10 +28,21 @@ def get_db():
         db.close()
 
 
+def _contexto_request(request: Request) -> dict:
+    """Metadatos de seguridad de la request para auditoría (IP/UA/correlación)."""
+    from app.core.observabilidad import obtener_request_id
+
+    return {
+        "ip_address": request.client.host if request.client else None,
+        "user_agent": request.headers.get("user-agent"),
+        "request_id": obtener_request_id(),
+    }
+
+
 @router.post("/login", response_model=TokenResponse)
-def login(req: LoginRequest, db: Session = Depends(get_db)):
+def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
     """Inicia sesión con email y password mediante JSON."""
-    return auth_service.login_usuario(db, req.email, req.password)
+    return auth_service.login_usuario(db, req.email, req.password, **_contexto_request(request))
 
 
 @router.post("/refresh", response_model=TokenRefreshResponse)
@@ -41,9 +52,9 @@ def refresh_token(req: TokenRefreshRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/logout", response_model=MessageResponse)
-def logout(req: TokenRefreshRequest, db: Session = Depends(get_db)):
+def logout(req: TokenRefreshRequest, request: Request, db: Session = Depends(get_db)):
     """Invalida el token activo y cierra sesión."""
-    auth_service.logout_usuario(db, req.refresh_token)
+    auth_service.logout_usuario(db, req.refresh_token, **_contexto_request(request))
     return {"message": "Sesión cerrada correctamente."}
 
 
@@ -55,8 +66,9 @@ def obtener_perfil(current_user: dict = Depends(get_current_user)):
 
 @router.post("/change-password", response_model=MessageResponse)
 def change_password(
-    req: ChangePasswordRequest, 
-    db: Session = Depends(get_db), 
+    req: ChangePasswordRequest,
+    request: Request,
+    db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
     """Permite al usuario autenticado cambiar su propia contraseña validando la actual."""
@@ -66,7 +78,8 @@ def change_password(
         db, 
         usuario_id=usuario_id, 
         password_actual=req.password_actual, 
-        password_nuevo=req.password_nuevo
+        password_nuevo=req.password_nuevo,
+        **_contexto_request(request),
     )
     _notificar_cambio_password(db, usuario_id)
     return {"message": "Contraseña cambiada exitosamente."}
@@ -96,14 +109,14 @@ def _notificar_cambio_password(db, usuario_id):
 
 
 @router.post("/forgot-password", response_model=MessageResponse)
-def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
+def forgot_password(req: ForgotPasswordRequest, request: Request, db: Session = Depends(get_db)):
     """Genera un token de recuperación de contraseña."""
-    mensaje = auth_service.solicitar_reset_password(db, req.email)
+    mensaje = auth_service.solicitar_reset_password(db, req.email, **_contexto_request(request))
     return {"message": mensaje}
 
 
 @router.post("/reset-password", response_model=MessageResponse)
-def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
+def reset_password(req: ResetPasswordRequest, request: Request, db: Session = Depends(get_db)):
     """Valida el token de recuperación y actualiza la contraseña."""
-    auth_service.resetear_password(db, req.token, req.new_password)
+    auth_service.resetear_password(db, req.token, req.new_password, **_contexto_request(request))
     return {"message": "Contraseña actualizada exitosamente."}

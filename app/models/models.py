@@ -31,7 +31,10 @@ class Cliente(Base):
     id = Column(Integer, primary_key=True, index=True)
     usuario_id = Column(Integer, ForeignKey("usuarios.id"), index=True, nullable=True)
     nombre = Column(String(100), nullable=False)
-    cedula = Column(String(20), unique=True, nullable=False)
+    # La cédula ya NO es única global: dos prestamistas pueden tener clientes
+    # con la misma cédula sin verse entre sí (el servicio valida unicidad
+    # dentro del portafolio del usuario).
+    cedula = Column(String(20), nullable=False, index=True)
     telefono = Column(String(20))
     email = Column(String(120), nullable=True)  # RF-081: contacto del formulario público
     direccion = Column(String(200))
@@ -344,6 +347,11 @@ class Token(Base):
     activo = Column(Integer, default=1)
     created_at = Column(DateTime, default=datetime.utcnow)
     expires_at = Column(DateTime, nullable=False)
+    # Backoffice: contexto de la sesión (nunca se almacenan secretos aquí,
+    # solo metadatos para el historial de accesos).
+    ultimo_uso_at = Column(DateTime, nullable=True)
+    ip_address = Column(String(50), nullable=True)
+    user_agent = Column(String(255), nullable=True)
 
     usuario = relationship("Usuario", back_populates="tokens")
 
@@ -415,6 +423,13 @@ class Auditoria(Base):
     descripcion = Column(Text)
     ip_address = Column(String(50))
     fecha = Column(DateTime, default=datetime.utcnow)
+    # Backoffice: trazabilidad de eventos de seguridad.
+    user_agent = Column(String(255), nullable=True)
+    request_id = Column(String(36), nullable=True)
+    resultado = Column(
+        Enum("ok", "fallido", name="resultado_auditoria"),
+        nullable=True,
+    )
 
     usuario = relationship("Usuario", back_populates="auditorias")
 
@@ -516,10 +531,15 @@ class Notificacion(Base):
 class PlantillaMensaje(Base):
     """Plantillas de mensajes por canal (RF-063)."""
     __tablename__ = "plantillas_mensaje"
+    # La clave es única POR USUARIO: dos prestamistas pueden tener plantillas
+    # con la misma clave sin afectarse entre sí (aislamiento multiusuario).
+    __table_args__ = (
+        UniqueConstraint("usuario_id", "clave", "canal", name="uq_plantillas_usuario_clave"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     usuario_id = Column(Integer, ForeignKey("usuarios.id"), index=True, nullable=True)
-    clave = Column(String(80), unique=True, nullable=False)
+    clave = Column(String(80), nullable=False)
     canal = Column(
         Enum("email", "sms", "whatsapp", name="canal_plantilla"),
         nullable=False,
@@ -584,26 +604,61 @@ class TransaccionPasarela(Base):
 
 
 class EnvioMensaje(Base):
-    """Registro de envíos y omisiones por canal (RF-061, RF-062)."""
+    """Registro de envíos y omisiones por canal (RF-061, RF-062).
+
+    Trazabilidad completa: usuario dueño, cliente destinatario, plantilla,
+    canal, estado (pendiente/enviado/entregado/leído/omitido/fallido),
+    respuesta del proveedor y error detallado.
+    """
     __tablename__ = "envios_mensaje"
 
     id = Column(Integer, primary_key=True, index=True)
     usuario_id = Column(Integer, ForeignKey("usuarios.id"), index=True, nullable=True)
+    cliente_id = Column(Integer, ForeignKey("clientes.id"), index=True, nullable=True)
     canal = Column(Enum("email", "sms", "whatsapp", name="canal_envio"), nullable=False)
     destinatario = Column(String(120), nullable=False)
     asunto = Column(String(200), nullable=True)
     cuerpo = Column(Text, nullable=True)
     plantilla_id = Column(Integer, ForeignKey("plantillas_mensaje.id"), nullable=True)
-    estado = Column(
-        Enum("enviado", "omitido", "fallido", name="estado_envio"),
-        default="enviado",
-        nullable=False,
-    )
+    # Sin CHECK para permitir los estados de entrega de WhatsApp
+    # (pendiente/enviado/entregado/leído) además de omitido/fallido.
+    estado = Column(String(30), default="enviado", nullable=False, index=True)
     motivo = Column(String(255), nullable=True)
     dedupe_clave = Column(String(120), nullable=True)  # RF-079: evita duplicados por evento/día
     fecha = Column(DateTime, default=datetime.utcnow)
+    # Trazabilidad WhatsApp
+    whatsapp_message_id = Column(String(120), nullable=True)
+    respuesta_proveedor = Column(Text, nullable=True)
+    error_detalle = Column(Text, nullable=True)
 
     plantilla = relationship("PlantillaMensaje")
+
+
+class CredencialesWhatsApp(Base):
+    """Credenciales propias de WhatsApp Business por prestamista (Modo 2).
+
+    La empresa administra el modo corporativo (variables de entorno); este
+    registro permite que cada usuario use su propia cuenta Business con
+    validación de conexión y trazabilidad de la última comprobación.
+    """
+    __tablename__ = "credenciales_whatsapp"
+
+    id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False, index=True)
+    proveedor = Column(String(40), default="meta_cloud", nullable=False)
+    access_token = Column(Text, nullable=False)
+    phone_number_id = Column(String(50), nullable=False)
+    business_account_id = Column(String(50), nullable=True)
+    api_key = Column(Text, nullable=True)
+    estado_conexion = Column(String(20), default="sin_probar", nullable=False)
+    ultima_validacion = Column(DateTime, nullable=True)
+    detalle_validacion = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("usuario_id", name="uq_credenciales_whatsapp_usuario"),
+    )
 
 
 class TipoCita(Base):
@@ -656,6 +711,113 @@ class EventoAgenda(Base):
     cliente = relationship("Cliente")
     prestamo = relationship("Prestamo")
     tipo_cita = relationship("TipoCita")
+
+
+class ErroresApp(Base):
+    """Incidentes de error agrupados por fingerprint (Backoffice)."""
+
+    __tablename__ = "errores_app"
+
+    id = Column(Integer, primary_key=True, index=True)
+    origen = Column(
+        Enum("backend", "frontend", name="origen_error"),
+        nullable=False,
+    )
+    nivel = Column(
+        Enum("error", "critico", name="nivel_error"),
+        default="error",
+        nullable=False,
+    )
+    tipo_exception = Column(String(150), nullable=False)
+    mensaje = Column(Text, nullable=False)
+    stack_trace = Column(Text, nullable=True)
+    endpoint = Column(String(200), nullable=True)
+    componente = Column(String(200), nullable=True)
+    metodo_http = Column(String(10), nullable=True)
+    status_code = Column(Integer, nullable=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), nullable=True, index=True)
+    ip_address = Column(String(50), nullable=True)
+    user_agent = Column(String(255), nullable=True)
+    request_id = Column(String(36), nullable=True, index=True)
+    version = Column(String(20), nullable=True)
+    fingerprint = Column(String(64), nullable=False, index=True)
+    ocurrencias = Column(Integer, default=1, nullable=False)
+    primera_ocurrencia = Column(DateTime, default=datetime.utcnow, nullable=False)
+    ultima_ocurrencia = Column(DateTime, default=datetime.utcnow, nullable=False)
+    estado = Column(
+        Enum("abierto", "en_seguimiento", "resuelto", "ignorado", name="estado_error"),
+        default="abierto",
+        nullable=False,
+        index=True,
+    )
+    responsable_id = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
+    resolucion = Column(Text, nullable=True)
+    fecha_resolucion = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    usuario = relationship("Usuario", foreign_keys=[usuario_id])
+    responsable = relationship("Usuario", foreign_keys=[responsable_id])
+
+
+class MetricaApi(Base):
+    """Agregado horario de peticiones API (fuente de series del dashboard)."""
+
+    __tablename__ = "metricas_api"
+    __table_args__ = (
+        UniqueConstraint(
+            "fecha_hora",
+            "endpoint",
+            "metodo",
+            "status_code",
+            name="uq_metricas_api_clave",
+        ),
+    )
+
+    fecha_hora = Column(DateTime, primary_key=True)
+    endpoint = Column(String(200), primary_key=True)
+    metodo = Column(String(10), primary_key=True)
+    status_code = Column(Integer, primary_key=True)
+    conteo = Column(Integer, default=0, nullable=False)
+    latencia_ms_suma = Column(Float, default=0.0, nullable=False)
+    latencia_ms_max = Column(Float, default=0.0, nullable=False)
+
+
+class EjecucionProceso(Base):
+    """Historial de ejecuciones de procesos programados y manuales."""
+
+    __tablename__ = "ejecuciones_proceso"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tarea = Column(String(80), nullable=False, index=True)
+    origen = Column(
+        Enum("programada", "manual", name="origen_ejecucion"),
+        default="programada",
+        nullable=False,
+    )
+    estado = Column(
+        Enum(
+            "pendiente",
+            "en_ejecucion",
+            "completado",
+            "fallido",
+            "cancelado",
+            name="estado_ejecucion",
+        ),
+        default="pendiente",
+        nullable=False,
+        index=True,
+    )
+    solicitado_por = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
+    fecha_solicitud = Column(DateTime, default=datetime.utcnow, nullable=False)
+    inicio = Column(DateTime, nullable=True)
+    fin = Column(DateTime, nullable=True)
+    duracion_ms = Column(Integer, nullable=True)
+    intentos = Column(Integer, default=1, nullable=False)
+    resultado = Column(Text, nullable=True)
+    error_mensaje = Column(Text, nullable=True)
+
+    solicitante = relationship("Usuario", foreign_keys=[solicitado_por])
 
 
 # Validar relaciones de SQLAlchemy

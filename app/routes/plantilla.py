@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from datetime import date
 from typing import Optional
 
-from app.dependencies.auth import get_current_user, get_db, require_rol
+from app.dependencies.auth import get_current_user, get_db, get_usuario_id, require_rol
 from app.schemas.plantilla import (
     PlantillaCreate,
     PlantillaOut,
@@ -57,6 +57,17 @@ def historial_envios(
     )
 
 
+@router.get("/variables")
+def variables_disponibles(
+    current_user: dict = Depends(get_current_user),
+):
+    """Catálogo de variables dinámicas agrupadas por categoría, con
+    descripción y ejemplo renderizado (panel de ayuda del editor)."""
+    from app.services.plantillas import catalogo_variables
+
+    return catalogo_variables()
+
+
 @router.get("/{plantilla_id}", response_model=PlantillaOut)
 def obtener_plantilla(
     plantilla_id: int,
@@ -76,7 +87,7 @@ def crear_plantilla(
     plantilla = plantillas_service.crear_plantilla(db, datos)
     registrar_auditoria(
         db,
-        usuario_id=current_user.get("sub"),
+        usuario_id=get_usuario_id(current_user),
         tabla_afectada="plantillas_mensaje",
         tipo_operacion="CREATE",
         registro_id=plantilla.id,
@@ -105,7 +116,7 @@ def actualizar_plantilla(
     plantilla = plantillas_service.actualizar_plantilla(db, plantilla_id, datos)
     registrar_auditoria(
         db,
-        usuario_id=current_user.get("sub"),
+        usuario_id=get_usuario_id(current_user),
         tabla_afectada="plantillas_mensaje",
         tipo_operacion="UPDATE",
         registro_id=plantilla.id,
@@ -134,7 +145,7 @@ def eliminar_plantilla(
     plantillas_service.eliminar_plantilla(db, plantilla_id)
     registrar_auditoria(
         db,
-        usuario_id=current_user.get("sub"),
+        usuario_id=get_usuario_id(current_user),
         tabla_afectada="plantillas_mensaje",
         tipo_operacion="DELETE",
         registro_id=plantilla_id,
@@ -148,8 +159,9 @@ def eliminar_plantilla(
 @router.post("/previsualizar", response_model=PlantillaPreviewOut)
 def previsualizar_plantilla(
     datos: PlantillaPreview,
+    db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
     return plantillas_service.previsualizar(
-        datos.clave, datos.canal, datos.cuerpo, datos.asunto, datos.contexto
+        db, datos.clave, datos.canal, datos.cuerpo, datos.asunto, datos.contexto
     )
