@@ -314,6 +314,78 @@ def _ejecutar_fila_manual(fila_id: int, tarea: str):
     return _ejecutar_y_registrar(tarea, "manual", fn, fila_id=fila_id)
 
 
+def programar_campana(
+    campana_id: int,
+    hora=None,
+    frecuencia: str = "diario",
+    dia_semana: int | None = None,
+    dia_mes: int | None = None,
+    activo: bool = True,
+) -> None:
+    """Registra/actualiza (o retira) el job cron de una campaña (Fase 2).
+
+    Import perezoso de campanas para evitar importación circular.
+    """
+    from functools import partial
+
+    from app.services.campanas import ejecutar_campana_job
+
+    job_id = f"campana_{campana_id}"
+    try:
+        scheduler.remove_job(job_id)
+    except Exception:  # noqa: BLE001 - el job aún no existía
+        pass
+
+    if not activo or hora is None:
+        return
+
+    kwargs = {}
+    if frecuencia == "semanal" and dia_semana is not None:
+        kwargs["day_of_week"] = dia_semana
+    elif frecuencia == "mensual" and dia_mes is not None:
+        kwargs["day"] = dia_mes
+
+    scheduler.add_job(
+        _envolver_programada(
+            f"campana_{campana_id}",
+            partial(ejecutar_campana_job, campana_id),
+        ),
+        trigger="cron",
+        hour=hora.hour,
+        minute=hora.minute,
+        id=job_id,
+        replace_existing=True,
+        misfire_grace_time=3600,
+        **kwargs,
+    )
+
+
+def _programar_campanas_activas() -> None:
+    """Registra los jobs de todas las campañas activas al arrancar."""
+    from app.models.models import CampanaMensaje
+
+    db = SessionLocal()
+    try:
+        activas = (
+            db.query(CampanaMensaje).filter(CampanaMensaje.estado == "activo").all()
+        )
+        for campana in activas:
+            try:
+                programar_campana(
+                    campana_id=campana.id,
+                    hora=campana.hora_ejecucion,
+                    frecuencia=campana.frecuencia,
+                    dia_semana=campana.dia_semana,
+                    dia_mes=campana.dia_mes,
+                    activo=True,
+                )
+            except Exception as exc:  # noqa: BLE001 - una campaña rota no tumba el scheduler
+                print(f"[SCHEDULER] Error programando campaña {campana.id}: {exc}")
+        print(f"[SCHEDULER] {len(activas)} campañas activas programadas")
+    finally:
+        db.close()
+
+
 def iniciar_scheduler():
     scheduler.add_job(
         _envolver_programada("tarea_diaria_sistema", ejecutar_tareas_diarias),
@@ -342,6 +414,8 @@ def iniciar_scheduler():
         replace_existing=True,
         misfire_grace_time=3600,
     )
+    # Campañas de mensajes automáticas del usuario (Fase 2)
+    _programar_campanas_activas()
     # Infraestructura: vuelco de métricas (no genera filas de historial).
     scheduler.add_job(
         ejecutar_flush_metricas,

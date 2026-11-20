@@ -355,6 +355,7 @@ def _asegurar_parametros_backoffice():
         ("auditoria_retencion_dias", "0", "Días de retención de auditoría (0=nunca se elimina)", "int"),
         ("nombre_empresa", "LoanSoft", "Nombre de la empresa usado en PDFs, reportes, contratos, comprobantes y mensajes", "string"),
         ("empresa_telefono", "", "Teléfono de la empresa mostrado en mensajes y documentos (vacío = usar variable de entorno EMPRESA_TELEFONO)", "string"),
+        ("empresa_whatsapp", "", "Número de WhatsApp de la empresa mostrado en mensajes y documentos", "string"),
         ("whatsapp_max_por_minuto", "60", "Máximo de mensajes WhatsApp por minuto en envíos masivos", "int"),
     ]
     with SessionLocal() as db:

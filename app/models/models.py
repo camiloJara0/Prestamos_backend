@@ -13,6 +13,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    Time,
     UniqueConstraint,
 )
 from sqlalchemy.orm import configure_mappers, relationship
@@ -632,6 +633,70 @@ class EnvioMensaje(Base):
     error_detalle = Column(Text, nullable=True)
 
     plantilla = relationship("PlantillaMensaje")
+
+
+class HistorialImportacion(Base):
+    """Bitácora de importaciones masivas Excel/CSV (Fase 4).
+
+    Registra cada ejecución: entidad, archivo, conteos y el detalle de
+    errores por fila (JSON en `bitacora`) para auditoría y reporte.
+    """
+    __tablename__ = "importaciones_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False, index=True)
+    entidad = Column(String(20), nullable=False)  # clientes|prestamos|pagos|cuotas
+    archivo_nombre = Column(String(255), nullable=True)
+    total_filas = Column(Integer, default=0)
+    exitosos = Column(Integer, default=0)
+    errores = Column(Integer, default=0)
+    bitacora = Column(Text, nullable=True)  # JSON: lista de errores por fila
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class CampanaMensaje(Base):
+    """Campaña de mensajes automáticos programada por el prestamista (Fase 2).
+
+    Combina una plantilla, un criterio de destinatarios (recordatorios:
+    próximos a vencer / vencidos) y un horario (diario/semanal/mensual).
+    El scheduler registra un job cron por campaña activa y cada ejecución
+    queda trazada en `ejecuciones_proceso` con tarea `campana_{id}`.
+    """
+    __tablename__ = "campanas_mensaje"
+
+    id = Column(Integer, primary_key=True, index=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False, index=True)
+    nombre = Column(String(120), nullable=False)
+    plantilla_id = Column(Integer, ForeignKey("plantillas_mensaje.id"), nullable=False)
+    hora_ejecucion = Column(Time, nullable=False)
+    frecuencia = Column(
+        Enum("diario", "semanal", "mensual", name="frecuencia_campana"),
+        default="diario",
+        nullable=False,
+    )
+    dia_semana = Column(Integer, nullable=True)  # 0=lunes .. 6=domingo (cron APScheduler)
+    dia_mes = Column(Integer, nullable=True)  # 1..28
+    filtro_tipo = Column(
+        Enum("proximos", "vencidos", name="filtro_campana"),
+        default="proximos",
+        nullable=False,
+    )
+    filtro_dias = Column(Integer, default=3, nullable=False)
+    estado = Column(
+        Enum("activo", "inactivo", name="estado_campana"),
+        default="activo",
+        nullable=False,
+        index=True,
+    )
+    ultima_ejecucion = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    plantilla = relationship("PlantillaMensaje")
+
+    __table_args__ = (
+        UniqueConstraint("usuario_id", "nombre", name="uq_campanas_usuario_nombre"),
+    )
 
 
 class CredencialesWhatsApp(Base):

@@ -16,6 +16,23 @@ def _uid_override() -> int | None:
     return None
 
 
+# Claves de plataforma: se gestionan EXCLUSIVAMENTE desde el Backoffice (admin).
+# Nunca se exponen a prestamistas/usuarios finales en /configuracion.
+CLAVES_PLATAFORMA = {
+    "sesiones_maximas",
+    "login_max_intentos",
+    "login_ventana_min",
+    "tokens_retencion_dias",
+    "errores_retencion_dias",
+    "metricas_retencion_dias",
+    "idempotency_retencion_horas",
+    "notificaciones_retencion_dias",
+    "envios_retencion_dias",
+    "auditoria_retencion_dias",
+    "whatsapp_max_por_minuto",
+}
+
+
 def override_parametro(db: Session, clave: str) -> ConfiguracionUsuario | None:
     """Override propio del usuario actual para una clave, si existe."""
     uid = _uid_override()
@@ -56,6 +73,8 @@ def resolver_parametro(db: Session, clave: str, default_value: str | None = None
 
 def get_configuracion_por_clave(db: Session, clave: str):
     """Configuración efectiva (override propio si existe, si no la global)."""
+    if clave in CLAVES_PLATAFORMA and _uid_override():
+        raise HTTPException(status_code=404, detail=f"Configuración '{clave}' no encontrada")
     propio = override_parametro(db, clave)
     if propio is not None:
         if not hasattr(propio, "origen"):
@@ -89,6 +108,9 @@ def get_todas_configuraciones(db: Session):
     uid = _uid_override()
     if not uid:
         return globales
+
+    # Los prestamistas/usuarios finales no ven los parámetros de plataforma.
+    globales = [g for g in globales if g.clave not in CLAVES_PLATAFORMA]
 
     propios = {
         o.clave: o
@@ -132,6 +154,11 @@ def actualizar_configuracion(db: Session, clave: str, datos: ConfiguracionUpdate
     )
     if not global_fila:
         raise HTTPException(status_code=404, detail=f"Configuración '{clave}' no encontrada")
+    if clave in CLAVES_PLATAFORMA and _uid_override():
+        raise HTTPException(
+            status_code=403,
+            detail="Este parámetro de plataforma solo se administra desde el Backoffice.",
+        )
 
     nuevo_valor = _validar_valor(global_fila.tipo_valor, datos.valor)
 

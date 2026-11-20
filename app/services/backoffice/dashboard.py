@@ -9,6 +9,7 @@ import os
 import shutil
 import time
 from datetime import datetime, timedelta
+from decimal import Decimal
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -97,7 +98,11 @@ def resumen_dashboard(db: Session) -> dict:
         .filter(MetricaApi.fecha_hora >= hoy00)
         .one()
     )
-    latencia_promedio = (float(latencia[0]) / latencia[1]) if latencia[1] else None
+    latencia_promedio = (
+        Decimal(str(latencia[0])) / Decimal(str(latencia[1])) 
+        if latencia[1] 
+        else None
+    )
     peticiones_hoy = int(latencia[1] or 0)
 
     return {

@@ -151,7 +151,15 @@ def detalle_usuario(db: Session, usuario_id: int) -> dict:
         "clientes": clientes,
         "permisos": sorted(permisos_de(usuario.rol)),
         "accesos": accesos,
-        "ultimos_eventos": eventos,
+        "ultimos_eventos": [
+            {
+                "id": e.id,
+                "tipo_operacion": e.tipo_operacion,
+                "fecha": e.fecha,
+                "descripcion": e.descripcion,
+            }
+            for e in eventos
+        ],
     }
 
 

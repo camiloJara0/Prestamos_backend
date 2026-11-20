@@ -1,7 +1,7 @@
 """Mensajería WhatsApp: credenciales del prestamista, prueba de conexión,
 envío individual/masivo e historial con trazabilidad."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -94,27 +94,42 @@ def _credenciales_out(fila: CredencialesWhatsApp) -> dict:
 # ---------------------------------------------------------------------------
 @router.get("/credenciales")
 def ver_credenciales(
+    request: Request,
     db: Session = Depends(get_db),
     _usuario: dict = Depends(get_current_user),
 ):
     fila = service.obtener_credenciales(db)
+    webhook_url = f"{str(request.base_url).rstrip('/')}/webhook/whatsapp"
     if not fila:
         return {
             "configurado": False,
             "modo": "corporativo",
             "credenciales": None,
+            "webhook_url": webhook_url,
         }
-    return {"configurado": True, "modo": "propio", "credenciales": _credenciales_out(fila)}
+    return {
+        "configurado": True,
+        "modo": "propio",
+        "credenciales": _credenciales_out(fila),
+        "webhook_url": webhook_url,
+    }
 
 
 @router.put("/credenciales")
 def guardar_credenciales(
     datos: CredencialesIn,
+    request: Request,
     db: Session = Depends(get_db),
     _usuario: dict = Depends(get_current_user),
 ):
     fila = service.guardar_credenciales(db, datos)
-    return {"configurado": True, "modo": "propio", "credenciales": _credenciales_out(fila)}
+    webhook_url = f"{str(request.base_url).rstrip('/')}/webhook/whatsapp"
+    return {
+        "configurado": True,
+        "modo": "propio",
+        "credenciales": _credenciales_out(fila),
+        "webhook_url": webhook_url,
+    }
 
 
 @router.delete("/credenciales")

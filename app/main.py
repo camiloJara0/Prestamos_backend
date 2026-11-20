@@ -10,11 +10,13 @@ from app.routes import (
     auditoria,
     auth,
     backoffice,
+    campanas,
     capital,
     clientes,
     conciliacion,
     configuracion,
     dashboard,
+    importacion,
     metodos_pago,  # <-- 1. Importamos el router de métodos de pago y QR
     mora,
     notificacion,
@@ -31,6 +33,7 @@ from app.routes import (
     tipo_pago,
     tipo_prestamo,
     usuarios,
+    webhook_whatsapp,
     whatsapp,
 )
 
@@ -66,6 +69,7 @@ allowed_origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "https://taskflow.ctsantaisabel.com",
+    "https://loansoft.netlify.app",
 ]
 
 frontend_url = os.getenv("FRONTEND_URL")
@@ -225,6 +229,8 @@ app.include_router(plantilla.router)
 app.include_router(pasarela.router)
 app.include_router(agenda.router)
 app.include_router(agenda.router_prestamos)
+app.include_router(campanas.router)
+app.include_router(importacion.router)
 app.include_router(onboarding.router)
 
 # Backoffice (consola interna): routers con permisos propios.
@@ -232,3 +238,5 @@ for _router in backoffice.routers:
     app.include_router(_router)
 
 app.include_router(whatsapp.router)
+# Webhook público de WhatsApp Business API (sin auth: verificación de Meta)
+app.include_router(webhook_whatsapp.router)

@@ -166,9 +166,11 @@ def registrar_pago(db: Session, pago: PagoCreate, usuario_id: int, ip_address: s
         estado_pago="confirmado",
         usuario_id=dueño
     )
-    db.add(db_pago)
 
-    # Actualizar estado de cuota (considerando solo pagos no devueltos)
+    # Estado de cuota: SOLO pagos no devueltos ANTERIORES. El pago actual se
+    # suma aparte: si se agrega a la sesión antes de esta consulta, el
+    # autoflush lo incluiría en `pagos_anteriores` y duplicaría el conteo
+    # (cuota marcada 'pagado' con abonos insuficientes).
     pagos_anteriores = (
         db.query(Pago)
         .filter(Pago.cuota_id == cuota.id, Pago.estado_pago != "devuelto")
@@ -180,6 +182,8 @@ def registrar_pago(db: Session, pago: PagoCreate, usuario_id: int, ip_address: s
         cuota.estado = "pagado"
     else:
         cuota.estado = "parcial"
+
+    db.add(db_pago)
 
     # Actualizar saldo del préstamo (capital + interés; protección para no bajar de 0)
     nuevo_saldo = round(prestamo.saldo_pendiente - (pago.capital_pagado + pago.interes_pagado), 2)
